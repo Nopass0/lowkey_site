@@ -61,16 +61,33 @@ jobs:
           NODE_ENV=production
           EOF
 
-      - name: Upload project
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_SERVER }}
-          username: ${{ secrets.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: "backend/src,backend/prisma,backend/.dockerignore,backend/bun.lock,backend/Dockerfile,backend/package.json,backend/tsconfig.json,frontend/api,frontend/app,frontend/components,frontend/hooks,frontend/lib,frontend/public,frontend/.dockerignore,frontend/bun.lock,frontend/components.json,frontend/Dockerfile,frontend/eslint.config.mjs,frontend/next-env.d.ts,frontend/next.config.ts,frontend/package.json,frontend/postcss.config.mjs,frontend/tsconfig.json,deploy,.env.backend,.env.compose,.gitignore,docker-compose.yml,run.sh,run.ps1"
-          target: ${{ env.REMOTE_BASE }}
-          rm: true
-          strip_components: 0
+      - name: Install rsync dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass rsync
+
+      - name: Upload project with rsync
+        shell: bash
+        env:
+          SSH_SERVER: ${{ secrets.SSH_SERVER }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sshpass -p "${SSH_PASSWORD}" ssh -o StrictHostKeyChecking=no "${SSH_USER}@${SSH_SERVER}" "mkdir -p '${REMOTE_BASE}'"
+          sshpass -p "${SSH_PASSWORD}" rsync -az --delete \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude "frontend/node_modules/" \
+            --exclude "frontend/.next/" \
+            --exclude "frontend/ssl/" \
+            --exclude "frontend/.env*" \
+            --exclude "frontend/*.tsbuildinfo" \
+            --exclude "backend/node_modules/" \
+            --exclude "backend/dist/" \
+            --exclude "backend/.env*" \
+            --exclude "deploy/runtime/" \
+            ./ "${SSH_USER}@${SSH_SERVER}:${REMOTE_BASE}/"
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
