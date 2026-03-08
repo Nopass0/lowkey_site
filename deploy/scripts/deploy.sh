@@ -131,7 +131,11 @@ ensure_certificate() {
 
 deploy_stack() {
   cd "${ROOT_DIR}"
-  docker compose --env-file .env.compose -p "lowkey-${APP_ENV}" up -d --build --remove-orphans
+  local compose_cmd=(docker compose --env-file .env.compose -p "lowkey-${APP_ENV}")
+
+  "${compose_cmd[@]}" build backend
+  "${compose_cmd[@]}" build frontend
+  "${compose_cmd[@]}" up -d --remove-orphans backend frontend
 }
 
 ensure_server_packages
