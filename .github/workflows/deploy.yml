@@ -67,7 +67,7 @@ jobs:
           host: ${{ secrets.SSH_SERVER }}
           username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "backend,deploy,frontend,.env.backend,.env.compose,.gitignore,docker-compose.yml,run.sh,run.ps1"
+          source: "backend/src,backend/prisma,backend/.dockerignore,backend/bun.lock,backend/Dockerfile,backend/package.json,backend/tsconfig.json,frontend/api,frontend/app,frontend/components,frontend/hooks,frontend/lib,frontend/public,frontend/.dockerignore,frontend/bun.lock,frontend/components.json,frontend/Dockerfile,frontend/eslint.config.mjs,frontend/next-env.d.ts,frontend/next.config.ts,frontend/package.json,frontend/postcss.config.mjs,frontend/tsconfig.json,deploy,.env.backend,.env.compose,.gitignore,docker-compose.yml,run.sh,run.ps1"
           target: ${{ env.REMOTE_BASE }}
           rm: true
           strip_components: 0
