@@ -33,6 +33,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare env files
+        shell: bash
+        run: |
+          cat > .env.compose <<EOF
+          APP_ENV=${APP_ENV}
+          BACKEND_BIND_PORT=${BACKEND_BIND_PORT}
+          FRONTEND_BIND_PORT=${FRONTEND_BIND_PORT}
+          NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+          NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+          EOF
+
+          cat > .env.backend <<EOF
+          DATABASE_URL=${DATABASE_URL}
+          REDIS_URL=${REDIS_URL}
+          JWT_SECRET=${JWT_SECRET}
+          JWT_EXPIRY=${JWT_EXPIRY}
+          ADMIN_LOGIN=${ADMIN_LOGIN}
+          ADMIN_JWT_EXPIRY=${ADMIN_JWT_EXPIRY}
+          TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+          TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
+          TOCHKA_API_KEY=${TOCHKA_API_KEY}
+          TOCHKA_ACCOUNT_ID=${TOCHKA_ACCOUNT_ID}
+          TOCHKA_MERCHANT_ID=${TOCHKA_MERCHANT_ID}
+          APP_FILES_DIR=./uploads
+          PORT=3001
+          NODE_ENV=production
+          EOF
+
       - name: Upload project
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -54,23 +82,12 @@ jobs:
           NEXT_PUBLIC_API_URL: ${{ env.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_SITE_URL: ${{ env.NEXT_PUBLIC_SITE_URL }}
           REMOTE_BASE: ${{ env.REMOTE_BASE }}
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          REDIS_URL: ${{ env.REDIS_URL }}
-          JWT_SECRET: ${{ env.JWT_SECRET }}
-          JWT_EXPIRY: ${{ env.JWT_EXPIRY }}
-          ADMIN_LOGIN: ${{ env.ADMIN_LOGIN }}
-          ADMIN_JWT_EXPIRY: ${{ env.ADMIN_JWT_EXPIRY }}
-          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ env.TELEGRAM_ADMIN_CHAT_ID }}
-          TOCHKA_API_KEY: ${{ env.TOCHKA_API_KEY }}
-          TOCHKA_ACCOUNT_ID: ${{ env.TOCHKA_ACCOUNT_ID }}
-          TOCHKA_MERCHANT_ID: ${{ env.TOCHKA_MERCHANT_ID }}
           LETSENCRYPT_EMAIL: ${{ env.LETSENCRYPT_EMAIL }}
         with:
           host: ${{ secrets.SSH_SERVER }}
           username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: APP_ENV,DOMAIN,BACKEND_BIND_PORT,FRONTEND_BIND_PORT,NEXT_PUBLIC_API_URL,NEXT_PUBLIC_SITE_URL,REMOTE_BASE,DATABASE_URL,REDIS_URL,JWT_SECRET,JWT_EXPIRY,ADMIN_LOGIN,ADMIN_JWT_EXPIRY,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,TOCHKA_API_KEY,TOCHKA_ACCOUNT_ID,TOCHKA_MERCHANT_ID,LETSENCRYPT_EMAIL
+          envs: APP_ENV,DOMAIN,BACKEND_BIND_PORT,FRONTEND_BIND_PORT,NEXT_PUBLIC_API_URL,NEXT_PUBLIC_SITE_URL,REMOTE_BASE,LETSENCRYPT_EMAIL
           script: |
             cd "${REMOTE_BASE}"
             chmod +x deploy/scripts/provision-server.sh
@@ -81,16 +98,5 @@ jobs:
             FRONTEND_BIND_PORT="${FRONTEND_BIND_PORT}" \
             NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL}" \
             NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL}" \
-            DATABASE_URL="${DATABASE_URL}" \
-            REDIS_URL="${REDIS_URL}" \
-            JWT_SECRET="${JWT_SECRET}" \
-            JWT_EXPIRY="${JWT_EXPIRY}" \
-            ADMIN_LOGIN="${ADMIN_LOGIN}" \
-            ADMIN_JWT_EXPIRY="${ADMIN_JWT_EXPIRY}" \
-            TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}" \
-            TELEGRAM_ADMIN_CHAT_ID="${TELEGRAM_ADMIN_CHAT_ID}" \
-            TOCHKA_API_KEY="${TOCHKA_API_KEY}" \
-            TOCHKA_ACCOUNT_ID="${TOCHKA_ACCOUNT_ID}" \
-            TOCHKA_MERCHANT_ID="${TOCHKA_MERCHANT_ID}" \
             LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL}" \
             ./deploy/scripts/deploy.sh
