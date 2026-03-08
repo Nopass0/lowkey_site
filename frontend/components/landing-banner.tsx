@@ -77,59 +77,49 @@ export function LandingBanner() {
   }, []);
 
   return (
-    <div className="relative w-full h-[70vh] min-h-[500px] flex items-center justify-center overflow-hidden bg-background border-b border-border">
+    <div className="relative flex h-[70vh] min-h-[500px] w-full items-center justify-center overflow-hidden border-b border-border bg-background">
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none opacity-40 dark:opacity-20"
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-40 dark:opacity-20"
       />
-      <div className="absolute inset-0 bg-background [mask-image:radial-gradient(transparent_20%,black_100%)] pointer-events-none" />
+      <div className="pointer-events-none absolute inset-0 bg-background [mask-image:radial-gradient(transparent_20%,black_100%)]" />
 
-      <div className="relative z-10 text-center px-4 md:px-6 w-full max-w-4xl mx-auto flex flex-col items-center">
+      <div className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center px-4 text-center md:px-6">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
-          className="bg-primary/10 border border-primary/20 text-primary px-4 py-1.5 rounded-full text-sm font-medium mb-6 backdrop-blur-md inline-block shadow-sm"
+          className="mb-6 inline-block rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary shadow-sm backdrop-blur-md"
         >
           Защищенное соединение для повседневной работы
         </motion.div>
 
         <motion.h1
-          className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-tight"
+          className="mb-6 text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <span className="text-primary bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-400">
+          <span className="bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-primary text-transparent">
             lowkey
           </span>{" "}
           — защищенное соединение и оптимизация интернет-маршрутов
         </motion.h1>
 
         <motion.p
-          className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-foreground mb-4 mt-6 leading-tight"
+          className="mt-6 mb-2 text-3xl font-extrabold leading-tight text-foreground sm:text-4xl md:text-5xl"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          Первые 3 месяца —{" "}
-          <span className="text-primary tracking-tight">99 рублей</span>
+          <span className="text-primary tracking-tight">от 79 рублей в месяц</span>
         </motion.p>
 
         <motion.p
-          className="text-xs md:text-sm text-muted-foreground/50 mb-2 mx-auto font-medium whitespace-nowrap"
+          className="mb-10 text-sm font-semibold text-muted-foreground/80 md:text-base"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.3 }}
-        >
-          * далее от 79 рублей в месяц
-        </motion.p>
-
-        <motion.p
-          className="text-xs md:text-sm text-muted-foreground/50 mb-10 mx-auto font-medium"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.35 }}
         >
           При оплате за год
         </motion.p>
@@ -141,7 +131,7 @@ export function LandingBanner() {
         >
           <Button
             size="lg"
-            className="text-lg px-8 py-7 rounded-full shadow-[0_0_40px_-10px_rgba(59,130,246,0.6)] cursor-pointer hover:scale-105 transition-all outline-none font-bold group"
+            className="group cursor-pointer rounded-full px-8 py-7 text-lg font-bold shadow-[0_0_40px_-10px_rgba(59,130,246,0.6)] transition-all hover:scale-105 outline-none"
             onClick={() => {
               setPlan("advanced", "yearly");
               setAuthModalOpen(true);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { apiClient } from "@/api/client";
+import { API_CONFIG } from "@/api/config";
 import type { SubscriptionPlan } from "@/api/types";
 import { useLanding } from "@/hooks/useLanding";
 import { Button } from "./ui/button";
@@ -63,7 +63,7 @@ function RollingNumber({ value }: { value: number }) {
   const digits = Math.round(value).toString().split("");
 
   return (
-    <span className="inline-flex overflow-hidden relative">
+    <span className="relative inline-flex overflow-hidden">
       <AnimatePresence mode="popLayout" initial={false}>
         {digits.map((digit, index) => (
           <motion.span
@@ -92,6 +92,22 @@ function getPeriodMeta(period: string) {
   );
 }
 
+async function loadPublicPlans() {
+  const response = await fetch(`${API_CONFIG.baseUrl}/subscriptions/plans`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as SubscriptionPlan[];
+}
+
 export function LandingPricing() {
   const [period, setPeriod] = useState<(typeof periods)[number]["value"]>(
     "monthly",
@@ -103,9 +119,9 @@ export function LandingPricing() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadPlans = async () => {
+    const run = async () => {
       try {
-        const data = await apiClient.get<SubscriptionPlan[]>("/subscriptions/plans");
+        const data = await loadPublicPlans();
         if (!cancelled && data.length > 0) {
           setPlans(data);
           setLoadError(false);
@@ -117,7 +133,7 @@ export function LandingPricing() {
       }
     };
 
-    loadPlans();
+    void run();
 
     return () => {
       cancelled = true;
@@ -132,17 +148,17 @@ export function LandingPricing() {
   const periodMeta = getPeriodMeta(period);
 
   return (
-    <section className="py-24 px-4 bg-muted/30 relative overflow-hidden">
-      <div className="absolute top-0 right-1/4 w-96 h-96 bg-primary/10 blur-[100px] pointer-events-none rounded-full" />
-      <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-primary/10 blur-[100px] pointer-events-none rounded-full" />
+    <section className="relative overflow-hidden bg-muted/30 px-4 py-24">
+      <div className="pointer-events-none absolute top-0 right-1/4 h-96 w-96 rounded-full bg-primary/10 blur-[100px]" />
+      <div className="pointer-events-none absolute bottom-0 left-1/4 h-96 w-96 rounded-full bg-primary/10 blur-[100px]" />
 
-      <div className="max-w-6xl mx-auto relative z-10">
-        <div className="text-center mb-10">
+      <div className="relative z-10 mx-auto max-w-6xl">
+        <div className="mb-10 text-center">
           <motion.h2
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="text-3xl md:text-5xl font-bold tracking-tight mb-4"
+            className="mb-4 text-3xl font-bold tracking-tight md:text-5xl"
           >
             Тарифные планы
           </motion.h2>
@@ -167,17 +183,17 @@ export function LandingPricing() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ delay: 0.2 }}
-          className="flex justify-center mb-12"
+          className="mb-12 flex justify-center"
         >
-          <div className="bg-background border border-border/50 p-1.5 rounded-full inline-flex flex-wrap items-center gap-1 shadow-sm">
+          <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border/50 bg-background p-1.5 shadow-sm">
             {periods.map((item) => (
               <button
                 key={item.value}
                 onClick={() => setPeriod(item.value)}
-                className={`px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                className={`cursor-pointer rounded-full px-4 py-2 text-sm font-medium transition-all sm:px-6 sm:py-2.5 ${
                   period === item.value
                     ? "bg-primary text-primary-foreground shadow-md"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
                 {item.label}
@@ -186,9 +202,10 @@ export function LandingPricing() {
           </div>
         </motion.div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto pt-8">
+        <div className="mx-auto grid max-w-5xl gap-8 pt-8 md:grid-cols-3">
           {plans.map((plan, index) => {
-            const currentMonthlyPrice = plan.prices[period] ?? plan.prices.monthly;
+            const currentMonthlyPrice =
+              plan.prices[period] ?? plan.prices.monthly;
 
             return (
               <motion.div
@@ -201,43 +218,43 @@ export function LandingPricing() {
                   type: "spring",
                   stiffness: 100,
                 }}
-                className="flex relative"
+                className="relative flex"
               >
                 <Card
-                  className={`relative w-full flex flex-col group transition-transform duration-300 hover:-translate-y-2 ${
+                  className={`group relative flex w-full flex-col transition-transform duration-300 hover:-translate-y-2 ${
                     plan.isPopular
-                      ? "border-primary shadow-xl shadow-primary/20 scale-105 z-10 overflow-visible"
+                      ? "z-10 scale-105 overflow-visible border-primary shadow-xl shadow-primary/20"
                       : "border-border/50"
                   }`}
                 >
                   {plan.isPopular ? (
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-1 text-sm font-semibold rounded-full shadow-md z-30 whitespace-nowrap">
+                    <div className="absolute -top-4 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-full bg-primary px-4 py-1 text-sm font-semibold text-primary-foreground shadow-md">
                       Самый выгодный
                     </div>
                   ) : null}
 
-                  <CardHeader className="text-center pb-2 pt-8">
-                    <CardTitle className="text-2xl mt-2">{plan.name}</CardTitle>
+                  <CardHeader className="pb-2 pt-8 text-center">
+                    <CardTitle className="mt-2 text-2xl">{plan.name}</CardTitle>
                     <CardDescription className="h-4">
                       {periodMeta.label}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex-1 px-6">
-                    <div className="flex flex-col items-center justify-center my-6 min-h-[96px]">
-                      <div className="text-4xl font-extrabold text-primary flex items-end gap-1">
+                    <div className="my-6 flex min-h-[96px] flex-col items-center justify-center">
+                      <div className="flex items-end gap-1 text-4xl font-extrabold text-primary">
                         <RollingNumber value={currentMonthlyPrice} />
                         <span className="ml-1">₽</span>
-                        <span className="text-lg text-muted-foreground font-medium relative top-[-4px] ml-1">
+                        <span className="relative top-[-4px] ml-1 text-lg font-medium text-muted-foreground">
                           {periodMeta.suffix}
                         </span>
                       </div>
                     </div>
 
-                    <ul className="space-y-4 mb-6">
+                    <ul className="mb-6 space-y-4">
                       {plan.features.map((feature) => (
                         <li key={feature} className="flex items-center gap-3">
-                          <div className="bg-primary/10 p-1 rounded-full shrink-0">
-                            <Check className="w-4 h-4 text-primary" />
+                          <div className="shrink-0 rounded-full bg-primary/10 p-1">
+                            <Check className="h-4 w-4 text-primary" />
                           </div>
                           <span className="text-sm font-medium">{feature}</span>
                         </li>
@@ -246,7 +263,7 @@ export function LandingPricing() {
                   </CardContent>
                   <CardFooter>
                     <Button
-                      className="w-full cursor-pointer h-12 text-base font-semibold group-hover:shadow-lg transition-all"
+                      className="h-12 w-full cursor-pointer text-base font-semibold transition-all group-hover:shadow-lg"
                       variant={plan.isPopular ? "default" : "secondary"}
                       onClick={() => handleSelectPlan(plan.id)}
                     >
