@@ -1,19 +1,11 @@
 /**
- * @fileoverview Subscription routes: plans listing and purchase.
- * Plans are hardcoded as they rarely change.
- *
- * Discount logic:
- * - If the user has activated a promo code with `plan_discount_pct` or
- *   `plan_discount_fixed`, those values are stored on the User model.
- * - On purchase they are applied, then reset to 0 atomically within the
- *   same Prisma transaction so each promo discount is used only once.
+ * @fileoverview Subscription routes: public plan listing and authenticated purchase.
  */
 
 import Elysia, { t } from "elysia";
 import { db } from "../db";
 import { authMiddleware } from "../auth/middleware";
 
-/** Duration multipliers in days for each billing period */
 const PERIOD_DAYS: Record<string, number> = {
   monthly: 30,
   "3months": 90,
@@ -21,109 +13,40 @@ const PERIOD_DAYS: Record<string, number> = {
   yearly: 365,
 };
 
-/** Hardcoded subscription plans with pricing */
-const PLANS = [
-  {
-    id: "starter",
-    name: "Начальный",
-    prices: {
-      monthly: 149,
-      "3months": 129,
-      "6months": 99,
-      yearly: 79,
-    },
-    features: ["1 устройство", "Базовая скорость", "Доступ к 5 локациям"],
-    isPopular: false,
-  },
-  {
-    id: "pro",
-    name: "Продвинутый",
-    prices: {
-      monthly: 299,
-      "3months": 249,
-      "6months": 199,
-      yearly: 149,
-    },
-    features: [
-      "3 устройства",
-      "Высокая скорость",
-      "Доступ ко всем локациям",
-      "Kill Switch",
-    ],
-    isPopular: true,
-  },
-  {
-    id: "advanced",
-    name: "Максимальный",
-    prices: {
-      monthly: 499,
-      "3months": 399,
-      "6months": 349,
-      yearly: 249,
-    },
-    features: [
-      "5 устройств",
-      "Максимальная скорость",
-      "Доступ ко всем локациям",
-      "Kill Switch",
-      "Выделенный IP",
-      "Приоритетная поддержка",
-    ],
-    isPopular: false,
-  },
-];
-
-/**
- * Subscription routes group.
- * Provides plan listing (public) and purchase endpoint (authenticated).
- */
-export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
-
-  // ─── GET /subscriptions/plans ──────────────────────────
-  /**
-   * @route GET /subscriptions/plans
-   * @returns {Array} All available subscription plans with prices and features.
-   * @access public
-   */
-  .get("/plans", async () => {
+const publicSubscriptionRoutes = new Elysia({ prefix: "/subscriptions" }).get(
+  "/plans",
+  async () => {
     const plans = await db.subscriptionPlan.findMany({
       where: { isActive: true },
       include: { prices: true },
       orderBy: { sortOrder: "asc" },
     });
 
-    // Transform to frontend format: { id, name, prices: { monthly: X, ... }, features, isPopular }
-    return plans.map((p) => {
+    return plans.map((plan) => {
       const priceMap: Record<string, number> = {};
-      p.prices.forEach((priceItem) => {
+      plan.prices.forEach((priceItem) => {
         priceMap[priceItem.period] = priceItem.price;
       });
 
       return {
-        id: p.slug,
-        name: p.name,
+        id: plan.slug,
+        name: plan.name,
         prices: priceMap,
-        features: p.features,
-        isPopular: p.isPopular,
+        features: plan.features,
+        isPopular: plan.isPopular,
       };
     });
-  })
+  },
+);
 
-  // ─── POST /subscriptions/purchase ──────────────────────
+const privateSubscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
   .use(authMiddleware)
-  /**
-   * @route POST /subscriptions/purchase
-   * @param {string} planId  - Plan slug: "starter" | "pro" | "advanced"
-   * @param {string} period  - Billing period: "monthly" | "3months" | "6months" | "yearly"
-   * @description Deducts from user balance and creates/updates subscription.
-   */
   .post(
     "/purchase",
     async ({ user, body, set }) => {
       try {
         const { planId: slug, period } = body;
 
-        // ── Validate plan in DB ────────────────────────────
         const plan = await db.subscriptionPlan.findUnique({
           where: { slug, isActive: true },
           include: { prices: true },
@@ -134,8 +57,7 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
           return { message: "Plan not found" };
         }
 
-        // ── Validate period ────────────────────────────────
-        const priceItem = plan.prices.find((p) => p.period === period);
+        const priceItem = plan.prices.find((item) => item.period === period);
         if (!priceItem) {
           set.status = 400;
           return { message: "Invalid billing period" };
@@ -148,12 +70,9 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
         }
 
         const pricePerMonth = priceItem.price;
-
-        // ── Base price calculation ─────────────────────────
         const months = days / 30;
         const baseTotalPrice = pricePerMonth * months;
 
-        // ── Fetch user with discount fields ────────────────
         const dbUser = await db.user.findUnique({
           where: { id: user.userId },
           select: {
@@ -169,7 +88,6 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
           return { message: "User not found" };
         }
 
-        // ── Apply promo discounts ──────────────────────────
         const fixedDiscount = dbUser.pendingDiscountFixed ?? 0;
         const pctDiscount = dbUser.pendingDiscountPct ?? 0;
         let discountedPrice = baseTotalPrice;
@@ -182,13 +100,11 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
         }
         const totalPrice = Math.max(1, Math.round(discountedPrice * 100) / 100);
 
-        // ── Balance check ──────────────────────────────────
         if (dbUser.balance < totalPrice) {
           set.status = 402;
           return { message: "Insufficient balance" };
         }
 
-        // ── Date helpers ───────────────────────────────────
         const now = new Date();
         const activeUntil = new Date(
           now.getTime() + days * 24 * 60 * 60 * 1000,
@@ -202,9 +118,7 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
                 ? "6 мес."
                 : "1 год";
 
-        // ── Execute in transaction ─────────────────────────
         const result = await db.$transaction(async (tx) => {
-          // 1. Deduct balance and reset promo discounts
           const updatedUser = await tx.user.update({
             where: { id: user.userId },
             data: {
@@ -214,9 +128,8 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
             },
           });
 
-          // 2. Create transaction record
           const discountNote =
-            fixedDiscount > 0 || pctDiscount > 0 ? ` (скидка)` : "";
+            fixedDiscount > 0 || pctDiscount > 0 ? " (скидка)" : "";
 
           await tx.transaction.create({
             data: {
@@ -227,7 +140,6 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
             },
           });
 
-          // 3. Upsert subscription
           const subscription = await tx.subscription.upsert({
             where: { userId: user.userId },
             update: { planId: plan.slug, planName: plan.name, activeUntil },
@@ -239,7 +151,6 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
             },
           });
 
-          // 4. Award referral commission
           if (dbUser.referredById) {
             const referrer = await tx.user.findUnique({
               where: { id: dbUser.referredById },
@@ -289,3 +200,7 @@ export const subscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
       }),
     },
   );
+
+export const subscriptionRoutes = new Elysia()
+  .use(publicSubscriptionRoutes)
+  .use(privateSubscriptionRoutes);
