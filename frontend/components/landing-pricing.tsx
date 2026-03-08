@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { apiClient } from "@/api/client";
+import type { SubscriptionPlan } from "@/api/types";
+import { useLanding } from "@/hooks/useLanding";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -11,66 +15,50 @@ import {
   CardHeader,
   CardTitle,
 } from "./ui/card";
-import { AnimatePresence, motion } from "motion/react";
-import { useLanding } from "@/hooks/useLanding";
 
 const periods = [
-  { value: "1", label: "1 месяц" },
-  { value: "3", label: "3 месяца" },
-  { value: "6", label: "6 месяцев" },
-  { value: "12", label: "1 год" },
-];
+  { value: "monthly", label: "1 месяц", suffix: "/ мес" },
+  { value: "3months", label: "3 месяца", suffix: "/ мес" },
+  { value: "6months", label: "6 месяцев", suffix: "/ мес" },
+  { value: "yearly", label: "1 год", suffix: "/ мес" },
+] as const;
 
-const plans = [
+const fallbackPlans: SubscriptionPlan[] = [
   {
     id: "starter",
     name: "Начальный",
-    description: "Для базовых задач",
-    basePrice: 349,
-    features: [
-      "Высокая скорость",
-      "Защищенное соединение",
-      "Без логов",
-      "До 3 устройств",
-    ],
+    prices: { monthly: 149, "3months": 129, "6months": 99, yearly: 79 },
+    features: ["1 устройство", "Базовая скорость", "Доступ к 5 локациям"],
+    isPopular: false,
   },
   {
     id: "pro",
-    name: "Рабочий",
-    description: "Для стабильной работы",
-    basePrice: 499,
+    name: "Продвинутый",
+    prices: { monthly: 299, "3months": 249, "6months": 199, yearly: 149 },
     features: [
-      "Максимальная скорость",
-      "Защищенное соединение",
-      "Без логов",
-      "До 5 устройств",
-      "Приоритетная поддержка",
+      "3 устройства",
+      "Высокая скорость",
+      "Доступ ко всем локациям",
+      "Kill Switch",
     ],
-    popular: true,
+    isPopular: true,
   },
   {
     id: "advanced",
-    name: "Продвинутый",
-    description: "Максимум возможностей",
-    basePrice: 699,
+    name: "Максимальный",
+    prices: { monthly: 499, "3months": 399, "6months": 349, yearly: 249 },
     features: [
+      "5 устройств",
       "Максимальная скорость",
-      "Индивидуальный IP",
-      "Без логов",
-      "До 10 устройств",
-      "Поддержка 24/7",
+      "Доступ ко всем локациям",
+      "Kill Switch",
+      "Выделенный IP",
+      "Приоритетная поддержка",
     ],
+    isPopular: false,
   },
 ];
 
-const getDiscount = (period: string) => {
-  if (period === "3") return 0.05;
-  if (period === "6") return 0.15;
-  if (period === "12") return 0.2;
-  return 0;
-};
-
-// Animated rolling numbers for individual digits
 function RollingNumber({ value }: { value: number }) {
   const digits = Math.round(value).toString().split("");
 
@@ -94,16 +82,54 @@ function RollingNumber({ value }: { value: number }) {
   );
 }
 
+function getPeriodMeta(period: string) {
+  return (
+    periods.find((item) => item.value === period) ?? {
+      value: period,
+      label: period,
+      suffix: "/ мес",
+    }
+  );
+}
+
 export function LandingPricing() {
-  const [period, setPeriod] = useState("1");
+  const [period, setPeriod] = useState<(typeof periods)[number]["value"]>(
+    "monthly",
+  );
+  const [plans, setPlans] = useState<SubscriptionPlan[]>(fallbackPlans);
+  const [loadError, setLoadError] = useState(false);
   const { setPlan, setAuthModalOpen } = useLanding();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPlans = async () => {
+      try {
+        const data = await apiClient.get<SubscriptionPlan[]>("/subscriptions/plans");
+        if (!cancelled && data.length > 0) {
+          setPlans(data);
+          setLoadError(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadError(true);
+        }
+      }
+    };
+
+    loadPlans();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSelectPlan = (planId: string) => {
     setPlan(planId, period);
     setAuthModalOpen(true);
   };
 
-  const discount = getDiscount(period);
+  const periodMeta = getPeriodMeta(period);
 
   return (
     <section className="py-24 px-4 bg-muted/30 relative overflow-hidden">
@@ -129,6 +155,11 @@ export function LandingPricing() {
           >
             Выберите план, подходящий именно вам
           </motion.p>
+          {loadError ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Не удалось загрузить тарифы из базы, показан резервный набор.
+            </p>
+          ) : null}
         </div>
 
         <motion.div
@@ -139,31 +170,29 @@ export function LandingPricing() {
           className="flex justify-center mb-12"
         >
           <div className="bg-background border border-border/50 p-1.5 rounded-full inline-flex flex-wrap items-center gap-1 shadow-sm">
-            {periods.map((p) => (
+            {periods.map((item) => (
               <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
+                key={item.value}
+                onClick={() => setPeriod(item.value)}
                 className={`px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
-                  period === p.value
+                  period === item.value
                     ? "bg-primary text-primary-foreground shadow-md"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 }`}
               >
-                {p.label}
+                {item.label}
               </button>
             ))}
           </div>
         </motion.div>
 
-        {/* pt-8 to give room for absolute top tags */}
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto pt-8">
           {plans.map((plan, i) => {
-            const currentMonthlyPrice = plan.basePrice * (1 - discount);
-            const isDiscounted = discount > 0;
+            const currentMonthlyPrice = plan.prices[period] ?? plan.prices.monthly;
 
             return (
               <motion.div
-                key={plan.name}
+                key={plan.id}
                 initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -176,69 +205,41 @@ export function LandingPricing() {
               >
                 <Card
                   className={`relative w-full flex flex-col group transition-transform duration-300 hover:-translate-y-2 ${
-                    plan.popular
+                    plan.isPopular
                       ? "border-primary shadow-xl shadow-primary/20 scale-105 z-10 overflow-visible"
                       : "border-border/50"
                   }`}
                 >
-                  {plan.popular && (
+                  {plan.isPopular ? (
                     <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-1 text-sm font-semibold rounded-full shadow-md z-30 whitespace-nowrap">
                       Самый выгодный
                     </div>
-                  )}
+                  ) : null}
 
                   <CardHeader className="text-center pb-2 pt-8">
                     <CardTitle className="text-2xl mt-2">{plan.name}</CardTitle>
                     <CardDescription className="h-4">
-                      {plan.description}
+                      {periodMeta.label}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex-1 px-6">
                     <div className="flex flex-col items-center justify-center my-6 min-h-[96px]">
-                      <AnimatePresence mode="wait">
-                        {isDiscounted ? (
-                          <motion.div
-                            key="discount-badge"
-                            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                            animate={{
-                              opacity: 1,
-                              height: "auto",
-                              marginBottom: 16,
-                            }}
-                            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                            className="flex items-center gap-2 overflow-hidden"
-                          >
-                            <span className="text-xl text-muted-foreground line-through decoration-destructive/60 font-semibold">
-                              {plan.basePrice} ₽
-                            </span>
-                            <span className="text-xs font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full">
-                              Скидка {Math.round(discount * 100)}%
-                            </span>
-                          </motion.div>
-                        ) : (
-                          <motion.div
-                            key="no-discount"
-                            className="h-[28px]" // Placeholder height to prevent layout jumps
-                          />
-                        )}
-                      </AnimatePresence>
-
                       <div className="text-4xl font-extrabold text-primary flex items-end gap-1">
                         <RollingNumber value={currentMonthlyPrice} />
                         <span className="ml-1">₽</span>
                         <span className="text-lg text-muted-foreground font-medium relative top-[-4px] ml-1">
-                          / мес
+                          {periodMeta.suffix}
                         </span>
                       </div>
                     </div>
 
                     <ul className="space-y-4 mb-6">
-                      {plan.features.map((f) => (
-                        <li key={f} className="flex items-center gap-3">
+                      {plan.features.map((feature) => (
+                        <li key={feature} className="flex items-center gap-3">
                           <div className="bg-primary/10 p-1 rounded-full shrink-0">
                             <Check className="w-4 h-4 text-primary" />
                           </div>
-                          <span className="text-sm font-medium">{f}</span>
+                          <span className="text-sm font-medium">{feature}</span>
                         </li>
                       ))}
                     </ul>
@@ -246,7 +247,7 @@ export function LandingPricing() {
                   <CardFooter>
                     <Button
                       className="w-full cursor-pointer h-12 text-base font-semibold group-hover:shadow-lg transition-all"
-                      variant={plan.popular ? "default" : "secondary"}
+                      variant={plan.isPopular ? "default" : "secondary"}
                       onClick={() => handleSelectPlan(plan.id)}
                     >
                       Выбрать тариф
