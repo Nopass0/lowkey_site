@@ -14,10 +14,7 @@ require_backend_env() {
   local key="$1"
   local value="${!key:-}"
 
-  if [[ -z "${value}" ]]; then
-    echo "Missing required backend environment variable: ${key}" >&2
-    return 1
-  fi
+  [[ -n "${value}" ]]
 }
 
 render_template() {
@@ -35,9 +32,8 @@ ensure_server_packages() {
   "${ROOT_DIR}/deploy/scripts/provision-server.sh"
 }
 
-write_env_files() {
+write_compose_env_file() {
   local compose_tmp
-  local backend_tmp
 
   compose_tmp="$(mktemp)"
 
@@ -49,18 +45,29 @@ NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 EOF
   mv "${compose_tmp}" "${ROOT_DIR}/.env.compose"
+}
 
-  require_backend_env DATABASE_URL
-  require_backend_env REDIS_URL
-  require_backend_env JWT_SECRET
-  require_backend_env JWT_EXPIRY
-  require_backend_env ADMIN_LOGIN
-  require_backend_env ADMIN_JWT_EXPIRY
-  require_backend_env TELEGRAM_BOT_TOKEN
-  require_backend_env TELEGRAM_ADMIN_CHAT_ID
-  require_backend_env TOCHKA_API_KEY
-  require_backend_env TOCHKA_ACCOUNT_ID
-  require_backend_env TOCHKA_MERCHANT_ID
+write_backend_env_file() {
+  local backend_tmp
+
+  if ! require_backend_env DATABASE_URL ||
+    ! require_backend_env REDIS_URL ||
+    ! require_backend_env JWT_SECRET ||
+    ! require_backend_env JWT_EXPIRY ||
+    ! require_backend_env ADMIN_LOGIN ||
+    ! require_backend_env ADMIN_JWT_EXPIRY ||
+    ! require_backend_env TELEGRAM_BOT_TOKEN ||
+    ! require_backend_env TELEGRAM_ADMIN_CHAT_ID ||
+    ! require_backend_env TOCHKA_API_KEY ||
+    ! require_backend_env TOCHKA_ACCOUNT_ID ||
+    ! require_backend_env TOCHKA_MERCHANT_ID; then
+    if [[ -s "${ROOT_DIR}/.env.backend" ]]; then
+      return
+    fi
+
+    echo "Missing backend environment variables and no existing .env.backend found" >&2
+    exit 1
+  fi
 
   backend_tmp="$(mktemp)"
 
@@ -81,6 +88,11 @@ PORT=3001
 NODE_ENV=production
 EOF
   mv "${backend_tmp}" "${ROOT_DIR}/.env.backend"
+}
+
+write_env_files() {
+  write_compose_env_file
+  write_backend_env_file
 
   mkdir -p "${ROOT_DIR}/deploy/runtime/${APP_ENV}/uploads"
 }
