@@ -166,7 +166,6 @@ deploy_stack() {
   export DOCKER_BUILDKIT=1
   export COMPOSE_DOCKER_CLI_BUILD=1
 
-  "${compose_cmd[@]}" build backend
   "${compose_cmd[@]}" build frontend
   "${compose_cmd[@]}" up -d --remove-orphans ollama backend frontend
   "${compose_cmd[@]}" exec -T ollama ollama pull "${AI_LOCAL_MODEL:-qwen3.5:0.8b}" || true
