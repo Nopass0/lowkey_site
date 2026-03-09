@@ -43,6 +43,18 @@ export const config = {
   /** Directory for storing uploaded app files */
   APP_FILES_DIR: process.env.APP_FILES_DIR ?? "./uploads",
 
+  /** Vercel Blob token for AI uploads and generated artifacts */
+  BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN ?? "",
+
+  /** Optional global OpenRouter API key fallback */
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
+
+  /** Default local LLM endpoint */
+  AI_LOCAL_BASE_URL: process.env.AI_LOCAL_BASE_URL ?? "http://ollama:11434",
+
+  /** Default local model name */
+  AI_LOCAL_MODEL: process.env.AI_LOCAL_MODEL ?? "qwen3:0.6b",
+
   /** Server port */
   PORT: parseInt(process.env.PORT ?? "3001", 10),
 } as const;

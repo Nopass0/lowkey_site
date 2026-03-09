@@ -28,7 +28,13 @@ model User {
   botState                  String? // For managing interactive flows (e.g., "admin_search_user", "withdraw_step_1")
   tempReferrerId            String? // temporary storage for referral link between /start and link
   referralRate              Float             @default(0.2)
+  aiPurchasedTokens         Int               @default(0)
+  aiFreeTokensUsed          Int               @default(0)
   devices                   Device[]
+  aiConversations           AiConversation[]
+  aiFiles                   AiFile[]
+  aiSubscription            AiSubscription?
+  aiUsageEntries            AiUsageEntry[]
   payments                  Payment[]
   promoActivations          PromoActivation[]
   subscription              Subscription?
@@ -249,4 +255,121 @@ model VpnToken {
 
   @@unique([userId, deviceId])
   @@map("vpn_tokens")
+}
+
+model AiSettings {
+  id                    String   @id @default("global")
+  openRouterApiKey      String?
+  defaultModel          String   @default("openai/gpt-4o-mini")
+  localModel            String   @default("qwen3:0.6b")
+  localBaseUrl          String   @default("http://ollama:11434")
+  freeMonthlyTokens     Int      @default(500000)
+  aiPlanMonthlyTokens   Int      @default(10000000)
+  maxPlanMonthlyTokens  Int      @default(25000000)
+  aiPlanPrice           Float    @default(490)
+  maxPlanPrice          Float    @default(890)
+  comboPlanPrice        Float    @default(1190)
+  tokenPackSize         Int      @default(5000000)
+  tokenPackPrice        Float    @default(290)
+  systemPrompt          String?
+  maxContextMessages    Int      @default(14)
+  enableReasoning       Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("ai_settings")
+}
+
+model AiSubscription {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  tier              String
+  title             String
+  activeUntil       DateTime
+  monthlyTokenLimit Int
+  monthlyTokensUsed Int      @default(0)
+  periodStartsAt    DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_subscriptions")
+}
+
+model AiConversation {
+  id        String      @id @default(uuid())
+  userId    String
+  title     String
+  model     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  messages  AiMessage[]
+  files     AiFile[]
+  usage     AiUsageEntry[]
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id           String          @id @default(uuid())
+  conversationId String
+  role         String
+  content      String
+  reasoning    String?
+  attachments  Json?
+  artifacts    Json?
+  toolEvents   Json?
+  model        String?
+  inputTokens  Int             @default(0)
+  outputTokens Int             @default(0)
+  totalTokens  Int             @default(0)
+  costUsd      Float           @default(0)
+  createdAt    DateTime        @default(now())
+  conversation AiConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  files        AiFile[]
+  usage        AiUsageEntry[]
+
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiUsageEntry {
+  id             String          @id @default(uuid())
+  userId         String
+  conversationId String?
+  messageId      String?
+  provider       String
+  model          String
+  inputTokens    Int             @default(0)
+  outputTokens   Int             @default(0)
+  totalTokens    Int             @default(0)
+  costUsd        Float           @default(0)
+  createdAt      DateTime        @default(now())
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        AiMessage?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("ai_usage_entries")
+}
+
+model AiFile {
+  id             String          @id @default(uuid())
+  userId         String
+  conversationId String?
+  messageId      String?
+  fileName       String
+  mimeType       String
+  size           Int
+  blobUrl        String
+  kind           String          @default("upload")
+  createdAt      DateTime        @default(now())
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        AiMessage?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("ai_files")
 }

@@ -27,6 +27,7 @@ import { adminServerRoutes } from "./admin/server/routes";
 import { adminAppRoutes } from "./admin/apps/routes";
 import { adminTariffRoutes } from "./admin/tariffs/routes";
 import { vpnServerRoutes } from "./servers/routes";
+import { aiRoutes } from "./ai/routes";
 
 // ─── Background VPN-server heartbeat monitor ─────────────────────────────────
 
@@ -163,6 +164,7 @@ const app = new Elysia()
   .use(adminAppRoutes)
   .use(adminTariffRoutes)
   .use(vpnServerRoutes)
+  .use(aiRoutes)
 
   // ─── Start server ─────────────────────────────────────────
   .listen(config.PORT);

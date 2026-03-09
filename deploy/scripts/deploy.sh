@@ -4,11 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_ENV="${APP_ENV:?APP_ENV is required}"
 DOMAIN="${DOMAIN:?DOMAIN is required}"
+AI_DOMAIN="${AI_DOMAIN:-}"
 BACKEND_BIND_PORT="${BACKEND_BIND_PORT:?BACKEND_BIND_PORT is required}"
 FRONTEND_BIND_PORT="${FRONTEND_BIND_PORT:?FRONTEND_BIND_PORT is required}"
 NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
 NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://${DOMAIN}}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}"
+SERVER_NAMES="${DOMAIN}${AI_DOMAIN:+ ${AI_DOMAIN}}"
 
 require_backend_env() {
   local key="$1"
@@ -23,6 +25,7 @@ render_template() {
 
   sed \
     -e "s/__DOMAIN__/${DOMAIN}/g" \
+    -e "s/__SERVER_NAMES__/${SERVER_NAMES}/g" \
     -e "s/__BACKEND_PORT__/${BACKEND_BIND_PORT}/g" \
     -e "s/__FRONTEND_PORT__/${FRONTEND_BIND_PORT}/g" \
     "${template_path}" > "${target_path}"
@@ -83,6 +86,10 @@ TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
 TOCHKA_API_KEY=${TOCHKA_API_KEY}
 TOCHKA_ACCOUNT_ID=${TOCHKA_ACCOUNT_ID}
 TOCHKA_MERCHANT_ID=${TOCHKA_MERCHANT_ID}
+BLOB_READ_WRITE_TOKEN=${BLOB_READ_WRITE_TOKEN:-}
+OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+AI_LOCAL_BASE_URL=${AI_LOCAL_BASE_URL:-http://ollama:11434}
+AI_LOCAL_MODEL=${AI_LOCAL_MODEL:-qwen3:0.6b}
 APP_FILES_DIR=./uploads
 PORT=3001
 NODE_ENV=production
@@ -120,13 +127,21 @@ ensure_certificate() {
     return
   fi
 
-  certbot certonly \
-    --webroot \
-    -w /var/www/certbot \
-    -d "${DOMAIN}" \
-    --non-interactive \
-    --agree-tos \
+  local certbot_args=(
+    certbot certonly
+    --webroot
+    -w /var/www/certbot
+    -d "${DOMAIN}"
+    --non-interactive
+    --agree-tos
     -m "${LETSENCRYPT_EMAIL}"
+  )
+
+  if [[ -n "${AI_DOMAIN}" ]]; then
+    certbot_args+=(-d "${AI_DOMAIN}")
+  fi
+
+  "${certbot_args[@]}"
 }
 
 deploy_stack() {
@@ -138,7 +153,8 @@ deploy_stack() {
 
   "${compose_cmd[@]}" build backend
   "${compose_cmd[@]}" build frontend
-  "${compose_cmd[@]}" up -d --remove-orphans backend frontend
+  "${compose_cmd[@]}" up -d --remove-orphans ollama backend frontend
+  "${compose_cmd[@]}" exec -T ollama ollama pull "${AI_LOCAL_MODEL:-qwen3:0.6b}" || true
 }
 
 ensure_server_packages

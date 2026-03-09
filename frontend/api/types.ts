@@ -268,6 +268,152 @@ export interface WithdrawalItem {
   createdAt: string;
 }
 
+export interface AiPublicPlan {
+  slug: string;
+  title: string;
+  price: number;
+  monthlyTokens?: number;
+}
+
+export interface AiTokenPack {
+  slug: string;
+  amount: number;
+  price: number;
+}
+
+export interface AiPublicConfig {
+  defaultModel: string;
+  freeMonthlyTokens: number;
+  plans: AiPublicPlan[];
+  tokenPack: AiTokenPack;
+}
+
+export interface AiConversationListItem {
+  id: string;
+  title: string;
+  model: string | null;
+  updatedAt: string;
+  lastMessage: string | null;
+}
+
+export interface AiQuotaState {
+  includedLimit: number;
+  usedIncluded: number;
+  includedRemaining: number;
+  purchasedTokens: number;
+  totalAvailable: number;
+}
+
+export interface AiSubscriptionState {
+  tier: string;
+  title: string;
+  activeUntil: string;
+  monthlyTokenLimit: number;
+  monthlyTokensUsed: number;
+}
+
+export interface AiUserState {
+  quota: AiQuotaState;
+  subscription: AiSubscriptionState | null;
+  settings: {
+    defaultModel: string;
+    freeMonthlyTokens: number;
+    aiPlanPrice: number;
+    maxPlanPrice: number;
+    comboPlanPrice: number;
+    tokenPackPrice: number;
+    tokenPackSize: number;
+  };
+  conversations: AiConversationListItem[];
+}
+
+export interface AiFileItem {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  blobUrl: string;
+  kind: string;
+  createdAt?: string;
+}
+
+export interface AiChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  reasoning?: string | null;
+  attachments?: unknown;
+  artifacts?: unknown;
+  toolEvents?: unknown;
+  model?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  createdAt: string;
+}
+
+export interface AiConversationDetail {
+  id: string;
+  title: string;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: AiChatMessage[];
+  files: AiFileItem[];
+}
+
+export interface AiChatResponse {
+  conversationId: string;
+  reply: AiChatMessage;
+  artifacts: AiFileItem[];
+}
+
+export interface AiAdminSettings {
+  openRouterApiKey: string | null;
+  defaultModel: string;
+  localModel: string;
+  localBaseUrl: string;
+  freeMonthlyTokens: number;
+  aiPlanMonthlyTokens: number;
+  maxPlanMonthlyTokens: number;
+  aiPlanPrice: number;
+  maxPlanPrice: number;
+  comboPlanPrice: number;
+  tokenPackSize: number;
+  tokenPackPrice: number;
+  systemPrompt: string | null;
+  maxContextMessages: number;
+  enableReasoning: boolean;
+}
+
+export interface AiAdminAnalytics {
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    users: number;
+    activeSubscriptions: number;
+  };
+  users: Array<{
+    userId: string;
+    login: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    messages: number;
+  }>;
+  recentUsage: Array<{
+    id: string;
+    userId: string;
+    login: string;
+    model: string;
+    provider: string;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    createdAt: string;
+  }>;
+}
+
 // ─────────────────────────────────────────────
 // Downloads — GET /downloads/*
 // ─────────────────────────────────────────────
