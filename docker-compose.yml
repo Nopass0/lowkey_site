@@ -35,5 +35,3 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/runtime/${APP_ENV}/ollama:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
