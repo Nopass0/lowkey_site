@@ -22,6 +22,47 @@ interface FileMeta {
   kind: string;
 }
 
+function isEmbeddingModel(model: string | null | undefined) {
+  const value = String(model || "").toLowerCase();
+  return value.includes("embed") || value.includes("embedding");
+}
+
+function getSafeLocalModel(model: string | null | undefined) {
+  const candidate = model || config.AI_LOCAL_MODEL || DEFAULT_LOCAL_MODEL;
+  return isEmbeddingModel(candidate) ? DEFAULT_LOCAL_MODEL : candidate;
+}
+
+function resolveChatModel(params: {
+  requestedModel?: string | null;
+  defaultModel?: string | null;
+  localModel?: string | null;
+  hasOpenRouter: boolean;
+}) {
+  const localModel = getSafeLocalModel(params.localModel);
+  const requestedModel = params.requestedModel?.trim();
+  const defaultModel = params.defaultModel?.trim();
+
+  if (
+    requestedModel &&
+    !isEmbeddingModel(requestedModel) &&
+    (requestedModel === localModel ||
+      requestedModel.startsWith("qwen") ||
+      requestedModel.startsWith("mercury"))
+  ) {
+    return { model: requestedModel, isLocalModel: true };
+  }
+
+  if (requestedModel && !isEmbeddingModel(requestedModel) && params.hasOpenRouter) {
+    return { model: requestedModel, isLocalModel: false };
+  }
+
+  if (defaultModel && !isEmbeddingModel(defaultModel) && params.hasOpenRouter) {
+    return { model: defaultModel, isLocalModel: false };
+  }
+
+  return { model: localModel, isLocalModel: true };
+}
+
 async function getAiSettings() {
   const settings = await db.aiSettings.upsert({
     where: { id: "global" },
@@ -48,6 +89,16 @@ async function getAiSettings() {
           settings.localModel === "qwen3:0.6b"
             ? config.AI_LOCAL_MODEL
             : settings.localModel,
+      },
+    });
+  }
+
+  if (isEmbeddingModel(settings.defaultModel) || isEmbeddingModel(settings.localModel)) {
+    return db.aiSettings.update({
+      where: { id: "global" },
+      data: {
+        defaultModel: getSafeLocalModel(settings.defaultModel),
+        localModel: getSafeLocalModel(settings.localModel),
       },
     });
   }
@@ -1057,16 +1108,15 @@ export const aiRoutes = new Elysia()
 
                 const requestedModel =
                   body.model || quota.settings.defaultModel || DEFAULT_LOCAL_MODEL;
-                const localModel =
-                  quota.settings.localModel || config.AI_LOCAL_MODEL || DEFAULT_LOCAL_MODEL;
                 const useOpenRouter =
                   Boolean(quota.settings.openRouterApiKey) ||
                   Boolean(config.OPENROUTER_API_KEY);
-                const isLocalModel =
-                  requestedModel === localModel ||
-                  requestedModel === quota.settings.defaultModel ||
-                  requestedModel.startsWith("qwen") ||
-                  requestedModel.startsWith("mercury");
+                const chatTarget = resolveChatModel({
+                  requestedModel,
+                  defaultModel: quota.settings.defaultModel,
+                  localModel: quota.settings.localModel || config.AI_LOCAL_MODEL,
+                  hasOpenRouter: useOpenRouter,
+                });
 
                 send("connected", {
                   conversationId: conversation.id,
@@ -1074,10 +1124,10 @@ export const aiRoutes = new Elysia()
                 });
 
                 const result =
-                  isLocalModel || !useOpenRouter
+                  chatTarget.isLocalModel || !useOpenRouter
                     ? await callLocalModelStream(
                         quota.settings.localBaseUrl || config.AI_LOCAL_BASE_URL,
-                        requestedModel,
+                        chatTarget.model,
                         messagePayload.map((message) => ({
                           role: String((message as JsonObject).role),
                           content: String((message as JsonObject).content),
@@ -1087,14 +1137,14 @@ export const aiRoutes = new Elysia()
                     : await callOpenRouter(
                         quota.settings.openRouterApiKey ||
                           config.OPENROUTER_API_KEY,
-                        requestedModel,
+                        chatTarget.model,
                         messagePayload,
                         quota.totalAvailable,
                         user.userId,
                         conversation.id,
                       );
 
-                if (!isLocalModel && useOpenRouter) {
+                if (!chatTarget.isLocalModel && useOpenRouter) {
                   for (const event of (result.toolEvents as JsonObject[]) ?? []) {
                     send("tool_result", event);
                   }
@@ -1283,11 +1333,17 @@ export const aiRoutes = new Elysia()
           const useOpenRouter =
             Boolean(quota.settings.openRouterApiKey) ||
             Boolean(config.OPENROUTER_API_KEY);
-          const result = useOpenRouter
+          const chatTarget = resolveChatModel({
+            requestedModel: preferredModel,
+            defaultModel: quota.settings.defaultModel,
+            localModel: quota.settings.localModel || config.AI_LOCAL_MODEL,
+            hasOpenRouter: useOpenRouter,
+          });
+          const result = !chatTarget.isLocalModel && useOpenRouter
             ? await callOpenRouter(
                 quota.settings.openRouterApiKey ||
                   config.OPENROUTER_API_KEY,
-                preferredModel,
+                chatTarget.model,
                 messagePayload,
                 quota.totalAvailable,
                 user.userId,
@@ -1295,7 +1351,7 @@ export const aiRoutes = new Elysia()
               )
             : await callLocalModel(
                 quota.settings.localBaseUrl || config.AI_LOCAL_BASE_URL,
-                quota.settings.localModel || config.AI_LOCAL_MODEL,
+                chatTarget.model,
                 messagePayload.map((message) => ({
                   role: String((message as JsonObject).role),
                   content: String((message as JsonObject).content),
