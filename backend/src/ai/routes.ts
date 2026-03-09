@@ -69,7 +69,9 @@ async function getAiSettings() {
     update: {},
     create: {
       id: "global",
-      defaultModel: config.AI_LOCAL_MODEL,
+      defaultModel: config.OPENROUTER_API_KEY
+        ? config.OPENROUTER_DEFAULT_MODEL
+        : config.AI_LOCAL_MODEL,
       localBaseUrl: config.AI_LOCAL_BASE_URL,
       localModel: config.AI_LOCAL_MODEL,
       openRouterApiKey: config.OPENROUTER_API_KEY || null,
@@ -89,6 +91,21 @@ async function getAiSettings() {
           settings.localModel === "qwen3:0.6b"
             ? config.AI_LOCAL_MODEL
             : settings.localModel,
+      },
+    });
+  }
+
+  if (
+    (settings.openRouterApiKey || config.OPENROUTER_API_KEY) &&
+    (settings.defaultModel === "qwen3:0.6b" ||
+      settings.defaultModel === config.AI_LOCAL_MODEL ||
+      isEmbeddingModel(settings.defaultModel))
+  ) {
+    return db.aiSettings.update({
+      where: { id: "global" },
+      data: {
+        defaultModel: config.OPENROUTER_DEFAULT_MODEL,
+        localModel: getSafeLocalModel(settings.localModel),
       },
     });
   }
