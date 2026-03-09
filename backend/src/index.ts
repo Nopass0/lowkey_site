@@ -167,7 +167,10 @@ const app = new Elysia()
   .use(aiRoutes)
 
   // ─── Start server ─────────────────────────────────────────
-  .listen(config.PORT);
+  .listen({
+    port: config.PORT,
+    hostname: "0.0.0.0",
+  });
 
 console.log(`🚀 lowkey VPN API running at http://localhost:${config.PORT}`);
 console.log(`📚 Swagger docs at http://localhost:${config.PORT}/swagger`);

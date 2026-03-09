@@ -169,6 +169,21 @@ deploy_stack() {
   "${compose_cmd[@]}" build frontend
   "${compose_cmd[@]}" up -d --remove-orphans ollama backend frontend
   "${compose_cmd[@]}" exec -T ollama ollama pull "${AI_LOCAL_MODEL:-qwen3.5:0.8b}" || true
+
+  local backend_url="http://127.0.0.1:${BACKEND_BIND_PORT}/"
+  local attempt
+
+  for attempt in {1..24}; do
+    if curl -fsS "${backend_url}" >/dev/null; then
+      return
+    fi
+    sleep 5
+  done
+
+  echo "Backend did not become healthy: ${backend_url}" >&2
+  "${compose_cmd[@]}" ps >&2 || true
+  "${compose_cmd[@]}" logs --tail=200 backend >&2 || true
+  exit 1
 }
 
 ensure_server_packages
