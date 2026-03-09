@@ -53,7 +53,7 @@ export const config = {
   AI_LOCAL_BASE_URL: process.env.AI_LOCAL_BASE_URL ?? "http://ollama:11434",
 
   /** Default local model name */
-  AI_LOCAL_MODEL: process.env.AI_LOCAL_MODEL ?? "qwen3:0.6b",
+  AI_LOCAL_MODEL: process.env.AI_LOCAL_MODEL ?? "qwen3.5:0.8b",
 
   /** Server port */
   PORT: parseInt(process.env.PORT ?? "3001", 10),
