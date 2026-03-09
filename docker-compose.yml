@@ -9,10 +9,13 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
+      AI_LOCAL_BASE_URL: http://ollama:11434
     volumes:
       - ./deploy/runtime/${APP_ENV}/uploads:/app/uploads
     ports:
       - "127.0.0.1:${BACKEND_BIND_PORT}:3001"
+    depends_on:
+      - ollama
 
   frontend:
     build:
@@ -26,3 +29,11 @@ services:
       - backend
     ports:
       - "127.0.0.1:${FRONTEND_BIND_PORT}:3000"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ./deploy/runtime/${APP_ENV}/ollama:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"

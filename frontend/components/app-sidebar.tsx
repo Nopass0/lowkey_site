@@ -1,19 +1,22 @@
 "use client";
+
 import * as React from "react";
+import Link from "next/link";
 import {
+  BarChart2,
+  Brain,
   CreditCard,
   Download,
   Gift,
   Home,
   Laptop,
-  VenetianMask,
-  Users,
-  Shield,
+  Package,
   Receipt,
   Server,
+  Shield,
   Tag,
-  BarChart2,
-  Package,
+  Users,
+  VenetianMask,
 } from "lucide-react";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
@@ -22,15 +25,15 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
-  SidebarRail,
   SidebarMenu,
-  SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar";
-import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
 const userNav = [
+  { title: "AI workspace", url: "/ai", icon: Brain },
   { title: "Кабинет", url: "/me", icon: Home },
   { title: "Финансы и тарифы", url: "/me/billing", icon: CreditCard },
   { title: "Промокоды", url: "/me/promo", icon: Gift },
@@ -40,6 +43,7 @@ const userNav = [
 ];
 
 const adminNav = [
+  { title: "AI", url: "/me/admin/ai", icon: Brain },
   { title: "Аналитика", url: "/me/admin/finance", icon: BarChart2 },
   { title: "Пользователи", url: "/me/admin/users", icon: Users },
   { title: "Тарифы", url: "/me/admin/tariffs", icon: CreditCard },
@@ -64,17 +68,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuButton
               size="lg"
               asChild
-              className="hover:bg-transparent cursor-pointer"
+              className="cursor-pointer hover:bg-transparent"
             >
               <Link href="/">
-                <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg shadow-md shadow-primary/20 shrink-0">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-md shadow-primary/20 shrink-0">
                   <VenetianMask className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                  <span className="truncate font-bold text-[15px] tracking-tight text-foreground">
+                  <span className="truncate text-[15px] font-bold tracking-tight text-foreground">
                     lowkey
                   </span>
-                  <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5">
+                  <span className="mt-0.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                     Workspace
                   </span>
                 </div>
@@ -89,10 +93,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
         {user?.isAdmin && (
           <>
-            {/* Divider label */}
             <div className="px-3 pt-4 pb-1 group-data-[collapsible=icon]:hidden">
               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-amber-500">
-                <Shield className="w-3 h-3" />
+                <Shield className="h-3 w-3" />
                 Администратор
               </div>
             </div>
