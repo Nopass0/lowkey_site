@@ -49,6 +49,10 @@ export const config = {
   /** Optional global OpenRouter API key fallback */
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
 
+  /** Default OpenRouter chat model when OpenRouter is enabled */
+  OPENROUTER_DEFAULT_MODEL:
+    process.env.OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-4o-mini",
+
   /** Default local LLM endpoint */
   AI_LOCAL_BASE_URL: process.env.AI_LOCAL_BASE_URL ?? "http://ollama:11434",
 
