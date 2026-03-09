@@ -9,6 +9,8 @@ import { authMiddleware, adminMiddleware } from "../auth/middleware";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DDG_SEARCH_URL = "https://duckduckgo.com/html/";
 const DEFAULT_TITLE = "Новый диалог";
+const DEFAULT_LOCAL_MODEL = "qwen3.5:0.8b";
+const encoder = new TextEncoder();
 
 type JsonObject = Record<string, unknown>;
 
@@ -21,16 +23,36 @@ interface FileMeta {
 }
 
 async function getAiSettings() {
-  return db.aiSettings.upsert({
+  const settings = await db.aiSettings.upsert({
     where: { id: "global" },
     update: {},
     create: {
       id: "global",
+      defaultModel: config.AI_LOCAL_MODEL,
       localBaseUrl: config.AI_LOCAL_BASE_URL,
       localModel: config.AI_LOCAL_MODEL,
       openRouterApiKey: config.OPENROUTER_API_KEY || null,
     },
   });
+
+  if (
+    !settings.openRouterApiKey &&
+    (settings.defaultModel === "openai/gpt-4o-mini" ||
+      settings.defaultModel === "qwen3:0.6b")
+  ) {
+    return db.aiSettings.update({
+      where: { id: "global" },
+      data: {
+        defaultModel: settings.localModel || config.AI_LOCAL_MODEL,
+        localModel:
+          settings.localModel === "qwen3:0.6b"
+            ? config.AI_LOCAL_MODEL
+            : settings.localModel,
+      },
+    });
+  }
+
+  return settings;
 }
 
 async function ensureAiPeriod(userId: string) {
@@ -116,6 +138,31 @@ function buildConversationTitle(message: string) {
   }
 
   return cleaned.slice(0, 60);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function chunkText(text: string, size = 28) {
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const word of text.split(/(\s+)/)) {
+    if (!word) continue;
+    if ((current + word).length > size && current) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current += word;
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.length ? chunks : [text];
 }
 
 function stripHtml(html: string) {
@@ -439,6 +486,108 @@ async function callLocalModel(
   };
 }
 
+async function callLocalModelStream(
+  baseUrl: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  onDelta: (chunk: string) => void,
+) {
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      messages,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Local model error: ${text}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Local model returned an empty stream");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const data = JSON.parse(trimmed) as {
+        done?: boolean;
+        message?: { content?: string };
+        prompt_eval_count?: number;
+        eval_count?: number;
+      };
+
+      const chunk = data.message?.content ?? "";
+      if (chunk) {
+        content += chunk;
+        onDelta(chunk);
+      }
+
+      if (data.done) {
+        usage = {
+          inputTokens: data.prompt_eval_count ?? 0,
+          outputTokens: data.eval_count ?? 0,
+          totalTokens:
+            (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+        };
+      }
+    }
+  }
+
+  return {
+    provider: "local",
+    model,
+    content: content || "Ответ не получен.",
+    reasoning: null,
+    usage,
+    toolEvents: [] as JsonObject[],
+  };
+}
+
+function buildSystemPrompt(settings: Awaited<ReturnType<typeof getAiSettings>>) {
+  return [
+    "You are lowkey AI, a polished assistant inside a premium chat UI.",
+    "Default local model is qwen3.5:0.8b unless another model is explicitly selected.",
+    "Always prefer progressive, readable answers that feel natural while they stream.",
+    "Format answers in clean Markdown.",
+    "Use headings, bullet lists and short paragraphs when they improve readability.",
+    "Use GitHub-flavored Markdown tables whenever the answer contains comparable values, specs, prices, pros/cons, steps or structured data.",
+    "LaTeX is allowed for formulas and must be wrapped in standard markdown math syntax.",
+    "When the user asks for charts, dashboards, analytics or comparisons, output a fenced JSON chart spec that matches this schema: {\"type\":\"bar|line|area|pie\",\"title\":\"...\",\"data\":[...],\"xKey\":\"name\",\"yKeys\":[\"value\"]}.",
+    "Prefer colorful multi-series bar, line and area charts when they help the user understand trends.",
+    "If a downloadable result is useful, call create_artifact instead of dumping the whole file into the chat.",
+    "If the user needs up-to-date information, call duckduckgo_search first and then smart_fetch_url for the most relevant pages.",
+    "If files are attached, analyze them and explicitly mention what you could read from them. Treat markdown, text, csv and json as readable content when provided.",
+    "Keep the final answer visually balanced for a centered chat layout: no giant walls of text and no unnecessary preambles.",
+    settings.systemPrompt || "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function buildMessagePayload(
   settings: Awaited<ReturnType<typeof getAiSettings>>,
   history: Array<{
@@ -449,14 +598,7 @@ function buildMessagePayload(
   files: FileMeta[],
   userMessage: string,
 ) {
-  const systemPrompt = [
-    "You are lowkey AI, a concise but capable assistant.",
-    "When useful, use tools for web search, URL reading and artifact creation.",
-    "Return markdown with readable tables and clear sections.",
-    settings.systemPrompt || "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const systemPrompt = buildSystemPrompt(settings);
 
   const fileNotes = files.length
     ? `Attached files:\n${files
@@ -811,6 +953,247 @@ export const aiRoutes = new Elysia()
         {
           body: t.Object({
             plan: t.String(),
+          }),
+        },
+      )
+      .post(
+        "/chat/stream",
+        async ({ user, body, set }) => {
+          set.headers["Content-Type"] = "text/event-stream; charset=utf-8";
+          set.headers["Cache-Control"] = "no-cache, no-transform";
+          set.headers.Connection = "keep-alive";
+
+          const stream = new ReadableStream({
+            async start(controller) {
+              const send = (event: string, data: unknown) => {
+                controller.enqueue(
+                  encoder.encode(
+                    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+                  ),
+                );
+              };
+
+              try {
+                const quota = await getUserAiQuota(user.userId);
+                if (quota.totalAvailable <= 0) {
+                  send("error", { message: "AI token limit reached" });
+                  controller.close();
+                  return;
+                }
+
+                let conversationId = body.conversationId || null;
+
+                if (!conversationId) {
+                  const created = await db.aiConversation.create({
+                    data: {
+                      userId: user.userId,
+                      title: buildConversationTitle(body.message),
+                    },
+                  });
+                  conversationId = created.id;
+                }
+
+                const conversation = await db.aiConversation.findFirst({
+                  where: { id: conversationId, userId: user.userId },
+                  include: {
+                    messages: {
+                      orderBy: { createdAt: "asc" },
+                    },
+                  },
+                });
+
+                if (!conversation) {
+                  send("error", { message: "Conversation not found" });
+                  controller.close();
+                  return;
+                }
+
+                const attachmentIds = body.attachmentIds ?? [];
+                const files = attachmentIds.length
+                  ? await db.aiFile.findMany({
+                      where: {
+                        id: { in: attachmentIds },
+                        userId: user.userId,
+                      },
+                      select: {
+                        id: true,
+                        fileName: true,
+                        mimeType: true,
+                        blobUrl: true,
+                        kind: true,
+                      },
+                    })
+                  : [];
+
+                const userMessageRecord = await db.aiMessage.create({
+                  data: {
+                    conversationId: conversation.id,
+                    role: "user",
+                    content: body.message,
+                    attachments: files as unknown as object,
+                  },
+                });
+
+                if (files.length) {
+                  await db.aiFile.updateMany({
+                    where: { id: { in: files.map((file) => file.id) } },
+                    data: {
+                      messageId: userMessageRecord.id,
+                      conversationId: conversation.id,
+                    },
+                  });
+                }
+
+                const messagePayload = buildMessagePayload(
+                  quota.settings,
+                  [...conversation.messages, userMessageRecord].map((message) => ({
+                    role: message.role,
+                    content: message.content,
+                    attachments: message.attachments,
+                  })),
+                  files,
+                  body.message,
+                );
+
+                const requestedModel =
+                  body.model || quota.settings.defaultModel || DEFAULT_LOCAL_MODEL;
+                const localModel =
+                  quota.settings.localModel || config.AI_LOCAL_MODEL || DEFAULT_LOCAL_MODEL;
+                const useOpenRouter =
+                  Boolean(quota.settings.openRouterApiKey) ||
+                  Boolean(config.OPENROUTER_API_KEY);
+                const isLocalModel =
+                  requestedModel === localModel ||
+                  requestedModel === quota.settings.defaultModel ||
+                  requestedModel.startsWith("qwen") ||
+                  requestedModel.startsWith("mercury");
+
+                send("connected", {
+                  conversationId: conversation.id,
+                  isNew: !body.conversationId,
+                });
+
+                const result =
+                  isLocalModel || !useOpenRouter
+                    ? await callLocalModelStream(
+                        quota.settings.localBaseUrl || config.AI_LOCAL_BASE_URL,
+                        requestedModel,
+                        messagePayload.map((message) => ({
+                          role: String((message as JsonObject).role),
+                          content: String((message as JsonObject).content),
+                        })),
+                        (chunk) => send("delta", { text: chunk }),
+                      )
+                    : await callOpenRouter(
+                        quota.settings.openRouterApiKey ||
+                          config.OPENROUTER_API_KEY,
+                        requestedModel,
+                        messagePayload,
+                        quota.totalAvailable,
+                        user.userId,
+                        conversation.id,
+                      );
+
+                if (!isLocalModel && useOpenRouter) {
+                  for (const event of (result.toolEvents as JsonObject[]) ?? []) {
+                    send("tool_result", event);
+                  }
+
+                  for (const chunk of chunkText(result.content)) {
+                    send("delta", { text: chunk });
+                    await delay(12);
+                  }
+                }
+
+                const artifacts = await db.aiFile.findMany({
+                  where: {
+                    userId: user.userId,
+                    conversationId: conversation.id,
+                    kind: "artifact",
+                  },
+                  orderBy: { createdAt: "desc" },
+                  take: 12,
+                });
+
+                const assistantMessage = await db.aiMessage.create({
+                  data: {
+                    conversationId: conversation.id,
+                    role: "assistant",
+                    content: result.content,
+                    reasoning: result.reasoning,
+                    model: result.model,
+                    inputTokens: result.usage.inputTokens,
+                    outputTokens: result.usage.outputTokens,
+                    totalTokens: result.usage.totalTokens,
+                    toolEvents: result.toolEvents as unknown as object,
+                    artifacts: artifacts as unknown as object,
+                  },
+                });
+
+                await db.aiUsageEntry.create({
+                  data: {
+                    userId: user.userId,
+                    conversationId: conversation.id,
+                    messageId: assistantMessage.id,
+                    provider: result.provider,
+                    model: result.model,
+                    inputTokens: result.usage.inputTokens,
+                    outputTokens: result.usage.outputTokens,
+                    totalTokens: result.usage.totalTokens,
+                  },
+                });
+
+                await consumeQuota(user.userId, result.usage.totalTokens);
+
+                await db.aiConversation.update({
+                  where: { id: conversation.id },
+                  data: { model: result.model },
+                });
+
+                send("done", {
+                  messageId: assistantMessage.id,
+                  content: assistantMessage.content,
+                  reasoning: assistantMessage.reasoning,
+                  model: assistantMessage.model,
+                  toolEvents: assistantMessage.toolEvents,
+                  artifacts: artifacts.map((artifact) => ({
+                    id: artifact.id,
+                    fileName: artifact.fileName,
+                    mimeType: artifact.mimeType,
+                    blobUrl: artifact.blobUrl,
+                    kind: artifact.kind,
+                  })),
+                  inputTokens: assistantMessage.inputTokens,
+                  outputTokens: assistantMessage.outputTokens,
+                  totalTokens: assistantMessage.totalTokens,
+                });
+              } catch (error) {
+                send("error", {
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "Streaming failed",
+                });
+              } finally {
+                controller.close();
+              }
+            },
+          });
+
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/event-stream; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+              Connection: "keep-alive",
+            },
+          });
+        },
+        {
+          body: t.Object({
+            conversationId: t.Optional(t.String()),
+            model: t.Optional(t.String()),
+            message: t.String(),
+            attachmentIds: t.Optional(t.Array(t.String())),
           }),
         },
       )
