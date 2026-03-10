@@ -31,6 +31,8 @@ const routeTitles: Record<string, string> = {
   "/me/devices": "Подключенные устройства",
 };
 
+routeTitles["/me/admin/mailings"] = "Рассылки в Telegram";
+
 export default function MeLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
