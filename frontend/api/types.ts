@@ -686,3 +686,45 @@ export interface AdminUserStatsResponse {
   dailyStats: AdminUserDailyStats[];
   transactions: Transaction[];
 }
+
+export interface AdminMailingRecipient {
+  id: string;
+  login: string;
+  telegramId: string | null;
+  isBanned: boolean;
+  joinedAt: string;
+}
+
+export interface AdminMailingItem {
+  id: string;
+  title: string;
+  message: string;
+  buttonText: string | null;
+  buttonUrl: string | null;
+  targetType: "all" | "selected";
+  selectedUserIds: string[];
+  status: "scheduled" | "processing" | "sent" | "failed";
+  scheduledAt: string;
+  processingAt: string | null;
+  sentAt: string | null;
+  targetCount: number;
+  sentCount: number;
+  failedCount: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: {
+    id: string;
+    login: string;
+  } | null;
+}
+
+export interface AdminCreateMailingRequest {
+  title: string;
+  message: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  targetType: "all" | "selected";
+  selectedUserIds: string[];
+  scheduledAt: string;
+}

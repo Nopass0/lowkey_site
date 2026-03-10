@@ -45,8 +45,35 @@ model User {
   vpnTokens                 VpnToken[]
   withdrawals               Withdrawal[]
   financeWithdrawalsCreated FinanceWithdrawal[]
+  createdMailings           TelegramMailing[] @relation("MailingCreator")
 
   @@map("users")
+}
+
+model TelegramMailing {
+  id              String   @id @default(uuid())
+  title           String
+  message         String
+  buttonText      String?
+  buttonUrl       String?
+  targetType      String
+  selectedUserIds String[] @default([])
+  status          String   @default("scheduled")
+  scheduledAt     DateTime
+  processingAt    DateTime?
+  sentAt          DateTime?
+  targetCount     Int      @default(0)
+  sentCount       Int      @default(0)
+  failedCount     Int      @default(0)
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdById     String?
+  createdBy       User?    @relation("MailingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledAt])
+  @@index([createdById, createdAt])
+  @@map("telegram_mailings")
 }
 
 model SubscriptionPlan {

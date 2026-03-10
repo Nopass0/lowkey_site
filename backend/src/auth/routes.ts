@@ -11,6 +11,7 @@ import { config } from "../config";
 import { signJwt, getTokenExp } from "./jwt";
 import { authMiddleware } from "./middleware";
 import crypto from "crypto";
+import { sendTelegramMessage } from "../telegram";
 
 /**
  * Generates a Gravatar-style avatar hash from a login string.
@@ -44,40 +45,6 @@ function getReferralCodeVariants(referralCode: string): string[] {
   return [...new Set([trimmed, upper, normalized, `REF_${normalized}`])].filter(
     Boolean,
   );
-}
-
-/**
- * Sends a message to the configured Telegram admin chat via Bot API.
- *
- * @param message - Text message to send
- */
-async function sendTelegramMessage(
-  chatId: string | number,
-  message: string,
-): Promise<void> {
-  if (!config.TELEGRAM_BOT_TOKEN || !chatId) {
-    console.warn(
-      "[Telegram] Bot token or chat ID not configured, skipping message:",
-      message,
-    );
-    return;
-  }
-  try {
-    await fetch(
-      `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: message,
-          parse_mode: "Markdown",
-        }),
-      },
-    );
-  } catch (err) {
-    console.error("[Telegram] Failed to send message:", err);
-  }
 }
 
 /**

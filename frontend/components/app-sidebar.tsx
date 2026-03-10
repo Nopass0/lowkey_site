@@ -12,6 +12,7 @@ import {
   Laptop,
   Package,
   Receipt,
+  Send,
   Server,
   Shield,
   Tag,
@@ -52,6 +53,12 @@ const adminNav = [
   { title: "Приложения", url: "/me/admin/apps", icon: Package },
   { title: "Сервер", url: "/me/admin/server", icon: Server },
 ];
+
+adminNav.splice(adminNav.length - 1, 0, {
+  title: "Рассылки",
+  url: "/me/admin/mailings",
+  icon: Send,
+});
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth();

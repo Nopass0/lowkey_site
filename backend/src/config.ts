@@ -28,8 +28,20 @@ export const config = {
   /** Telegram bot token for sending admin OTP codes */
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? "",
 
+  /** Telegram bot token for admin mailings */
+  TELEGRAM_MAILING_BOT_TOKEN:
+    process.env.TELEGRAM_MAILING_BOT_TOKEN ??
+    process.env.TELEGRAM_BOT_TOKEN ??
+    "",
+
   /** Telegram chat ID where admin OTP codes are sent */
   TELEGRAM_ADMIN_CHAT_ID: process.env.TELEGRAM_ADMIN_CHAT_ID ?? "",
+
+  /** Telegram chat ID used for test mailing previews */
+  TELEGRAM_MAILING_TEST_CHAT_ID:
+    process.env.TELEGRAM_MAILING_TEST_CHAT_ID ??
+    process.env.TELEGRAM_ADMIN_CHAT_ID ??
+    "",
 
   /** Tochka SBP API key */
   TOCHKA_API_KEY: process.env.TOCHKA_API_KEY ?? "",

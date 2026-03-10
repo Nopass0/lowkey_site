@@ -26,6 +26,10 @@ import { adminFinanceRoutes } from "./admin/finance/routes";
 import { adminServerRoutes } from "./admin/server/routes";
 import { adminAppRoutes } from "./admin/apps/routes";
 import { adminTariffRoutes } from "./admin/tariffs/routes";
+import {
+  adminMailingRoutes,
+  processPendingMailings,
+} from "./admin/mailings/routes";
 import { vpnServerRoutes } from "./servers/routes";
 import { aiRoutes } from "./ai/routes";
 
@@ -64,6 +68,25 @@ function startServerMonitor(): void {
   console.log(
     "[Monitor] VPN server heartbeat monitor started (2-min interval).",
   );
+}
+
+function startMailingWorker(): void {
+  const INTERVAL_MS = 15 * 1000;
+
+  const tick = async () => {
+    try {
+      await processPendingMailings();
+    } catch (error) {
+      console.error("[MailingWorker] Error:", error);
+    }
+  };
+
+  void tick();
+  setInterval(() => {
+    void tick();
+  }, INTERVAL_MS);
+
+  console.log("[MailingWorker] Started.");
 }
 
 /**
@@ -163,6 +186,7 @@ const app = new Elysia()
   .use(adminServerRoutes)
   .use(adminAppRoutes)
   .use(adminTariffRoutes)
+  .use(adminMailingRoutes)
   .use(vpnServerRoutes)
   .use(aiRoutes)
 
@@ -177,5 +201,6 @@ console.log(`📚 Swagger docs at http://localhost:${config.PORT}/swagger`);
 
 // Start background VPN-server offline detector
 startServerMonitor();
+startMailingWorker();
 
 export type App = typeof app;
