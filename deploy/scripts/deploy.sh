@@ -173,6 +173,13 @@ EOF
 
 write_n8n_env_file() {
   local n8n_tmp
+  local n8n_encryption_key
+
+  n8n_encryption_key="${N8N_ENCRYPTION_KEY:-${JWT_SECRET:-}}"
+
+  if [[ -z "${n8n_encryption_key}" && -s "${ROOT_DIR}/.env.n8n" ]]; then
+    return
+  fi
 
   n8n_tmp="$(mktemp)"
 
@@ -182,7 +189,7 @@ N8N_PORT=5678
 N8N_PROTOCOL=https
 N8N_EDITOR_BASE_URL=https://${N8N_DOMAIN}
 WEBHOOK_URL=https://${N8N_DOMAIN}/
-N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-${JWT_SECRET}}
+N8N_ENCRYPTION_KEY=${n8n_encryption_key}
 NODE_ENV=production
 N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 N8N_RUNNERS_ENABLED=true
