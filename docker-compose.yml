@@ -56,10 +56,35 @@ services:
       retries: 18
       start_period: 30s
 
+  n8n:
+    build:
+      context: ./n8n
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env.n8n
+    environment:
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      NODE_FUNCTION_ALLOW_BUILTIN: "*"
+      NODE_FUNCTION_ALLOW_EXTERNAL: axios,lodash,dayjs,moment,uuid,zod,cheerio
+      TZ: ${GENERIC_TIMEZONE}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+    ports:
+      - "127.0.0.1:${N8N_BIND_PORT}:5678"
+    volumes:
+      - ./deploy/runtime/${APP_ENV}/n8n:/home/node/.n8n
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:5678/ >/dev/null 2>&1 || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
     volumes:
       - ./deploy/runtime/${APP_ENV}/ollama:/root/.ollama
-
-volumes:

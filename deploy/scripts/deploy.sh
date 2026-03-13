@@ -5,8 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_ENV="${APP_ENV:?APP_ENV is required}"
 DOMAIN="${DOMAIN:?DOMAIN is required}"
 AI_DOMAIN="${AI_DOMAIN:-}"
+N8N_DOMAIN="${N8N_DOMAIN:-}"
 BACKEND_BIND_PORT="${BACKEND_BIND_PORT:?BACKEND_BIND_PORT is required}"
 FRONTEND_BIND_PORT="${FRONTEND_BIND_PORT:?FRONTEND_BIND_PORT is required}"
+N8N_BIND_PORT="${N8N_BIND_PORT:?N8N_BIND_PORT is required}"
 NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
 NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://${DOMAIN}}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}"
@@ -35,6 +37,75 @@ ensure_server_packages() {
   "${ROOT_DIR}/deploy/scripts/provision-server.sh"
 }
 
+append_n8n_http_config() {
+  local target_path="$1"
+
+  [[ -n "${N8N_DOMAIN}" ]] || return
+
+  cat >> "${target_path}" <<EOF
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${N8N_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${N8N_BIND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+}
+
+append_n8n_https_config() {
+  local target_path="$1"
+
+  [[ -n "${N8N_DOMAIN}" ]] || return
+
+  cat >> "${target_path}" <<EOF
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${N8N_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_prefer_server_ciphers off;
+
+    client_max_body_size 25m;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${N8N_BIND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+}
+
 write_compose_env_file() {
   local compose_tmp
 
@@ -44,6 +115,8 @@ write_compose_env_file() {
 APP_ENV=${APP_ENV}
 BACKEND_BIND_PORT=${BACKEND_BIND_PORT}
 FRONTEND_BIND_PORT=${FRONTEND_BIND_PORT}
+N8N_BIND_PORT=${N8N_BIND_PORT}
+GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
 NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 EOF
@@ -98,11 +171,41 @@ EOF
   mv "${backend_tmp}" "${ROOT_DIR}/.env.backend"
 }
 
+write_n8n_env_file() {
+  local n8n_tmp
+
+  n8n_tmp="$(mktemp)"
+
+  cat > "${n8n_tmp}" <<EOF
+N8N_HOST=${N8N_DOMAIN}
+N8N_PORT=5678
+N8N_PROTOCOL=https
+N8N_EDITOR_BASE_URL=https://${N8N_DOMAIN}
+WEBHOOK_URL=https://${N8N_DOMAIN}/
+N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-${JWT_SECRET}}
+NODE_ENV=production
+N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+N8N_RUNNERS_ENABLED=true
+N8N_DIAGNOSTICS_ENABLED=false
+N8N_PERSONALIZATION_ENABLED=false
+NODE_FUNCTION_ALLOW_BUILTIN=*
+NODE_FUNCTION_ALLOW_EXTERNAL=axios,lodash,dayjs,moment,uuid,zod,cheerio
+GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
+TZ=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
+N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
+N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-}
+N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-}
+EOF
+  mv "${n8n_tmp}" "${ROOT_DIR}/.env.n8n"
+}
+
 write_env_files() {
   write_compose_env_file
   write_backend_env_file
+  write_n8n_env_file
 
   mkdir -p "${ROOT_DIR}/deploy/runtime/${APP_ENV}/uploads"
+  mkdir -p "${ROOT_DIR}/deploy/runtime/${APP_ENV}/n8n"
 }
 
 install_nginx_config() {
@@ -112,8 +215,10 @@ install_nginx_config() {
 
   if [[ -f "${cert_dir}/fullchain.pem" && -f "${cert_dir}/privkey.pem" ]]; then
     render_template "${ROOT_DIR}/deploy/nginx-https.conf.template" "${target}"
+    append_n8n_https_config "${target}"
   else
     render_template "${ROOT_DIR}/deploy/nginx-http.conf.template" "${target}"
+    append_n8n_http_config "${target}"
   fi
 
   ln -sf "${target}" "${enabled}"
@@ -131,7 +236,13 @@ ensure_certificate() {
         needs_expand="true"
       fi
     else
-      return
+      needs_expand="false"
+    fi
+
+    if [[ -n "${N8N_DOMAIN}" ]]; then
+      if ! openssl x509 -in "${cert_dir}/fullchain.pem" -noout -text | grep -q "DNS:${N8N_DOMAIN}"; then
+        needs_expand="true"
+      fi
     fi
   fi
 
@@ -153,6 +264,10 @@ ensure_certificate() {
     certbot_args+=(-d "${AI_DOMAIN}")
   fi
 
+  if [[ -n "${N8N_DOMAIN}" ]]; then
+    certbot_args+=(-d "${N8N_DOMAIN}")
+  fi
+
   if [[ "${needs_expand}" == "true" ]]; then
     certbot_args+=(--expand)
   fi
@@ -167,7 +282,7 @@ deploy_stack() {
   export DOCKER_BUILDKIT=1
   export COMPOSE_DOCKER_CLI_BUILD=1
 
-  "${compose_cmd[@]}" up -d --remove-orphans ollama backend frontend
+  "${compose_cmd[@]}" up -d --remove-orphans ollama backend frontend n8n
 
   local backend_url="http://127.0.0.1:${BACKEND_BIND_PORT}/"
   local frontend_url="http://127.0.0.1:${FRONTEND_BIND_PORT}/"
@@ -189,15 +304,31 @@ deploy_stack() {
 
   for attempt in {1..72}; do
     if curl -fsS "${frontend_url}" >/dev/null; then
+      break
+    fi
+    sleep 5
+  done
+
+  if ! curl -fsS "${frontend_url}" >/dev/null; then
+    echo "Frontend did not become healthy: ${frontend_url}" >&2
+    "${compose_cmd[@]}" ps >&2 || true
+    "${compose_cmd[@]}" logs --tail=200 frontend >&2 || true
+    exit 1
+  fi
+
+  local n8n_url="http://127.0.0.1:${N8N_BIND_PORT}/"
+
+  for attempt in {1..36}; do
+    if curl -fsS "${n8n_url}" >/dev/null; then
       "${compose_cmd[@]}" exec -T ollama ollama pull "${AI_LOCAL_MODEL:-qwen3.5:0.8b}" || true
       return
     fi
     sleep 5
   done
 
-  echo "Frontend did not become healthy: ${frontend_url}" >&2
+  echo "n8n did not become healthy: ${n8n_url}" >&2
   "${compose_cmd[@]}" ps >&2 || true
-  "${compose_cmd[@]}" logs --tail=200 frontend >&2 || true
+  "${compose_cmd[@]}" logs --tail=200 n8n >&2 || true
   exit 1
 }
 
