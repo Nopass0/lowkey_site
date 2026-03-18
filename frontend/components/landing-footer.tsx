@@ -1,53 +1,75 @@
 import Link from "next/link";
 import { Bot, VenetianMask } from "lucide-react";
+import { BUSINESS_INFO } from "@/lib/business-info";
 
 export function LandingFooter() {
   return (
-    <footer className="border-t border-border bg-background py-16 px-4 md:px-8">
-      <div className="max-w-6xl mx-auto flex flex-col items-center md:items-start text-center md:text-left">
-        <div className="flex flex-col md:flex-row justify-between w-full gap-10">
-          <div className="flex flex-col items-center md:items-start gap-4">
+    <footer className="border-t border-border bg-background px-4 py-16 md:px-8">
+      <div className="mx-auto flex max-w-6xl flex-col items-center text-center md:items-start md:text-left">
+        <div className="flex w-full flex-col gap-10 md:flex-row md:justify-between">
+          <div className="flex flex-col items-center gap-4 md:items-start">
             <div className="flex items-center gap-2">
               <VenetianMask className="h-6 w-6 text-primary" />
               <span className="text-xl font-bold tracking-tight">lowkey</span>
             </div>
-            <div className="text-muted-foreground text-sm space-y-1">
+            <div className="space-y-1 text-sm text-muted-foreground">
               <p className="font-semibold text-foreground">
-                ИП Галин Богдан Маратович
+                {BUSINESS_INFO.fullName}
               </p>
-              <p>ИНН 740414494214</p>
+              <p>ИНН {BUSINESS_INFO.inn}</p>
+              <p>ОГРНИП {BUSINESS_INFO.ogrnip}</p>
+              <p>
+                <a
+                  href={`mailto:${BUSINESS_INFO.email}`}
+                  className="underline-offset-4 hover:text-primary hover:underline"
+                >
+                  {BUSINESS_INFO.email}
+                </a>
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 items-center md:items-end w-full md:w-auto">
-            <h4 className="font-semibold text-sm uppercase tracking-wider text-foreground mb-1">
-              Документы
+          <div className="flex flex-col items-center gap-3 md:items-end">
+            <h4 className="mb-1 text-sm font-semibold uppercase tracking-wider text-foreground">
+              Документы и условия
             </h4>
             <Link
               href="/legal/offer"
-              className="text-sm text-muted-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
+              className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
             >
               Публичная оферта
             </Link>
             <Link
               href="/legal/privacy"
-              className="text-sm text-muted-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
+              className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
             >
               Политика конфиденциальности
             </Link>
             <Link
-              href="https://t.me/lowkeyvpnbot"
+              href="/legal/payment"
+              className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
+            >
+              Оплата, доступ и возврат
+            </Link>
+            <Link
+              href="/legal/details"
+              className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
+            >
+              Реквизиты
+            </Link>
+            <Link
+              href={BUSINESS_INFO.telegramUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
             >
               <Bot className="h-4 w-4" />
-              @lowkeyvpnbot
+              {BUSINESS_INFO.telegram}
             </Link>
           </div>
         </div>
 
-        <div className="w-full h-px bg-border my-8" />
+        <div className="my-8 h-px w-full bg-border" />
 
         <div className="w-full text-center text-xs text-muted-foreground/60">
           <p>© {new Date().getFullYear()} lowkey. Все права защищены.</p>

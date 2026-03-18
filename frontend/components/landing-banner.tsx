@@ -5,7 +5,11 @@ import { motion } from "motion/react";
 import { useLanding } from "@/hooks/useLanding";
 import { Button } from "./ui/button";
 
-export function LandingBanner() {
+interface LandingBannerProps {
+  lowestPrice: number;
+}
+
+export function LandingBanner({ lowestPrice }: LandingBannerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { setAuthModalOpen, setPlan } = useLanding();
 
@@ -112,7 +116,9 @@ export function LandingBanner() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <span className="text-primary tracking-tight">от 79 рублей в месяц</span>
+          <span className="text-primary tracking-tight">
+            от {lowestPrice} рублей в месяц
+          </span>
         </motion.p>
 
         <motion.p
@@ -121,7 +127,7 @@ export function LandingBanner() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.3 }}
         >
-          При оплате за год
+          Актуальная стоимость подтягивается из базы данных
         </motion.p>
 
         <motion.div

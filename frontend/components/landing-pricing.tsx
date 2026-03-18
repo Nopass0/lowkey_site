@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { API_CONFIG } from "@/api/config";
 import type { SubscriptionPlan } from "@/api/types";
+import { fetchPublicPlans, fallbackPlans } from "@/lib/public-plans";
 import { useLanding } from "@/hooks/useLanding";
 import { Button } from "./ui/button";
 import {
@@ -22,42 +22,6 @@ const periods = [
   { value: "6months", label: "6 месяцев", suffix: "/ мес" },
   { value: "yearly", label: "1 год", suffix: "/ мес" },
 ] as const;
-
-const fallbackPlans: SubscriptionPlan[] = [
-  {
-    id: "starter",
-    name: "Начальный",
-    prices: { monthly: 149, "3months": 129, "6months": 99, yearly: 79 },
-    features: ["1 устройство", "Базовая скорость", "Доступ к 5 локациям"],
-    isPopular: false,
-  },
-  {
-    id: "pro",
-    name: "Продвинутый",
-    prices: { monthly: 299, "3months": 249, "6months": 199, yearly: 149 },
-    features: [
-      "3 устройства",
-      "Высокая скорость",
-      "Доступ ко всем локациям",
-      "Kill Switch",
-    ],
-    isPopular: true,
-  },
-  {
-    id: "advanced",
-    name: "Максимальный",
-    prices: { monthly: 499, "3months": 399, "6months": 349, yearly: 249 },
-    features: [
-      "5 устройств",
-      "Максимальная скорость",
-      "Доступ ко всем локациям",
-      "Kill Switch",
-      "Выделенный IP",
-      "Приоритетная поддержка",
-    ],
-    isPopular: false,
-  },
-];
 
 function RollingNumber({ value }: { value: number }) {
   const digits = Math.round(value).toString().split("");
@@ -92,27 +56,17 @@ function getPeriodMeta(period: string) {
   );
 }
 
-async function loadPublicPlans() {
-  const response = await fetch(`${API_CONFIG.baseUrl}/subscriptions/plans`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as SubscriptionPlan[];
+interface LandingPricingProps {
+  initialPlans?: SubscriptionPlan[];
 }
 
-export function LandingPricing() {
+export function LandingPricing({
+  initialPlans = fallbackPlans,
+}: LandingPricingProps) {
   const [period, setPeriod] = useState<(typeof periods)[number]["value"]>(
     "monthly",
   );
-  const [plans, setPlans] = useState<SubscriptionPlan[]>(fallbackPlans);
+  const [plans, setPlans] = useState<SubscriptionPlan[]>(initialPlans);
   const [loadError, setLoadError] = useState(false);
   const { setPlan, setAuthModalOpen } = useLanding();
 
@@ -120,16 +74,10 @@ export function LandingPricing() {
     let cancelled = false;
 
     const run = async () => {
-      try {
-        const data = await loadPublicPlans();
-        if (!cancelled && data.length > 0) {
-          setPlans(data);
-          setLoadError(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setLoadError(true);
-        }
+      const data = await fetchPublicPlans();
+      if (!cancelled && data.length > 0) {
+        setPlans(data);
+        setLoadError(data === fallbackPlans);
       }
     };
 
@@ -169,11 +117,11 @@ export function LandingPricing() {
             transition={{ delay: 0.1 }}
             className="text-xl text-muted-foreground"
           >
-            Выберите план, который подходит именно вам
+            Стоимость на сайте синхронизирована с базой данных
           </motion.p>
           {loadError ? (
             <p className="mt-3 text-sm text-muted-foreground">
-              Не удалось загрузить тарифы из базы, показан резервный набор.
+              Бэкенд недоступен, поэтому временно показан резервный набор цен.
             </p>
           ) : null}
         </div>
