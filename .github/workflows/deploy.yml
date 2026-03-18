@@ -130,8 +130,11 @@ jobs:
             ./ "${SSH_USER}@${SSH_SERVER}:${REMOTE_BASE}/"
 
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
+        shell: bash
         env:
+          SSH_SERVER: ${{ secrets.SSH_SERVER }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           APP_ENV: ${{ env.APP_ENV }}
           DOMAIN: ${{ env.DOMAIN }}
           AI_DOMAIN: ${{ env.AI_DOMAIN }}
@@ -164,44 +167,43 @@ jobs:
           N8N_BASIC_AUTH_ACTIVE: ${{ env.N8N_BASIC_AUTH_ACTIVE }}
           N8N_BASIC_AUTH_USER: ${{ env.N8N_BASIC_AUTH_USER }}
           N8N_BASIC_AUTH_PASSWORD: ${{ env.N8N_BASIC_AUTH_PASSWORD }}
-        with:
-          host: ${{ secrets.SSH_SERVER }}
-          username: ${{ secrets.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          envs: APP_ENV,DOMAIN,AI_DOMAIN,N8N_DOMAIN,BACKEND_BIND_PORT,FRONTEND_BIND_PORT,N8N_BIND_PORT,NEXT_PUBLIC_API_URL,NEXT_PUBLIC_SITE_URL,REMOTE_BASE,LETSENCRYPT_EMAIL,DATABASE_URL,REDIS_URL,JWT_SECRET,JWT_EXPIRY,ADMIN_LOGIN,ADMIN_JWT_EXPIRY,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,TOCHKA_API_KEY,TOCHKA_ACCOUNT_ID,TOCHKA_MERCHANT_ID,BLOB_READ_WRITE_TOKEN,OPENROUTER_API_KEY,OPENROUTER_DEFAULT_MODEL,AI_LOCAL_BASE_URL,AI_LOCAL_MODEL,GENERIC_TIMEZONE,N8N_ENCRYPTION_KEY,N8N_BASIC_AUTH_ACTIVE,N8N_BASIC_AUTH_USER,N8N_BASIC_AUTH_PASSWORD
-          script: |
-            cd "${REMOTE_BASE}"
-            chmod +x deploy/scripts/provision-server.sh
-            chmod +x deploy/scripts/deploy.sh
-            APP_ENV="${APP_ENV}" \
-            DOMAIN="${DOMAIN}" \
-            AI_DOMAIN="${AI_DOMAIN}" \
-            N8N_DOMAIN="${N8N_DOMAIN}" \
-            BACKEND_BIND_PORT="${BACKEND_BIND_PORT}" \
-            FRONTEND_BIND_PORT="${FRONTEND_BIND_PORT}" \
-            N8N_BIND_PORT="${N8N_BIND_PORT}" \
-            NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL}" \
-            NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL}" \
-            LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL}" \
-            DATABASE_URL="${DATABASE_URL}" \
-            REDIS_URL="${REDIS_URL}" \
-            JWT_SECRET="${JWT_SECRET}" \
-            JWT_EXPIRY="${JWT_EXPIRY}" \
-            ADMIN_LOGIN="${ADMIN_LOGIN}" \
-            ADMIN_JWT_EXPIRY="${ADMIN_JWT_EXPIRY}" \
-            TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}" \
-            TELEGRAM_ADMIN_CHAT_ID="${TELEGRAM_ADMIN_CHAT_ID}" \
-            TOCHKA_API_KEY="${TOCHKA_API_KEY}" \
-            TOCHKA_ACCOUNT_ID="${TOCHKA_ACCOUNT_ID}" \
-            TOCHKA_MERCHANT_ID="${TOCHKA_MERCHANT_ID}" \
-            BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN}" \
-            OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
-            OPENROUTER_DEFAULT_MODEL="${OPENROUTER_DEFAULT_MODEL}" \
-            AI_LOCAL_BASE_URL="${AI_LOCAL_BASE_URL}" \
-            AI_LOCAL_MODEL="${AI_LOCAL_MODEL}" \
-            GENERIC_TIMEZONE="${GENERIC_TIMEZONE}" \
-            N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY}" \
-            N8N_BASIC_AUTH_ACTIVE="${N8N_BASIC_AUTH_ACTIVE}" \
-            N8N_BASIC_AUTH_USER="${N8N_BASIC_AUTH_USER}" \
-            N8N_BASIC_AUTH_PASSWORD="${N8N_BASIC_AUTH_PASSWORD}" \
-            ./deploy/scripts/deploy.sh
+        run: |
+          sshpass -p "${SSH_PASSWORD}" ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=30 \
+            "${SSH_USER}@${SSH_SERVER}" \
+            "cd '${REMOTE_BASE}' && \
+             chmod +x deploy/scripts/provision-server.sh && \
+             chmod +x deploy/scripts/deploy.sh && \
+             APP_ENV='${APP_ENV}' \
+             DOMAIN='${DOMAIN}' \
+             AI_DOMAIN='${AI_DOMAIN}' \
+             N8N_DOMAIN='${N8N_DOMAIN}' \
+             BACKEND_BIND_PORT='${BACKEND_BIND_PORT}' \
+             FRONTEND_BIND_PORT='${FRONTEND_BIND_PORT}' \
+             N8N_BIND_PORT='${N8N_BIND_PORT}' \
+             NEXT_PUBLIC_API_URL='${NEXT_PUBLIC_API_URL}' \
+             NEXT_PUBLIC_SITE_URL='${NEXT_PUBLIC_SITE_URL}' \
+             LETSENCRYPT_EMAIL='${LETSENCRYPT_EMAIL}' \
+             DATABASE_URL='${DATABASE_URL}' \
+             REDIS_URL='${REDIS_URL}' \
+             JWT_SECRET='${JWT_SECRET}' \
+             JWT_EXPIRY='${JWT_EXPIRY}' \
+             ADMIN_LOGIN='${ADMIN_LOGIN}' \
+             ADMIN_JWT_EXPIRY='${ADMIN_JWT_EXPIRY}' \
+             TELEGRAM_BOT_TOKEN='${TELEGRAM_BOT_TOKEN}' \
+             TELEGRAM_ADMIN_CHAT_ID='${TELEGRAM_ADMIN_CHAT_ID}' \
+             TOCHKA_API_KEY='${TOCHKA_API_KEY}' \
+             TOCHKA_ACCOUNT_ID='${TOCHKA_ACCOUNT_ID}' \
+             TOCHKA_MERCHANT_ID='${TOCHKA_MERCHANT_ID}' \
+             BLOB_READ_WRITE_TOKEN='${BLOB_READ_WRITE_TOKEN}' \
+             OPENROUTER_API_KEY='${OPENROUTER_API_KEY}' \
+             OPENROUTER_DEFAULT_MODEL='${OPENROUTER_DEFAULT_MODEL}' \
+             AI_LOCAL_BASE_URL='${AI_LOCAL_BASE_URL}' \
+             AI_LOCAL_MODEL='${AI_LOCAL_MODEL}' \
+             GENERIC_TIMEZONE='${GENERIC_TIMEZONE}' \
+             N8N_ENCRYPTION_KEY='${N8N_ENCRYPTION_KEY}' \
+             N8N_BASIC_AUTH_ACTIVE='${N8N_BASIC_AUTH_ACTIVE}' \
+             N8N_BASIC_AUTH_USER='${N8N_BASIC_AUTH_USER}' \
+             N8N_BASIC_AUTH_PASSWORD='${N8N_BASIC_AUTH_PASSWORD}' \
+             ./deploy/scripts/deploy.sh"
