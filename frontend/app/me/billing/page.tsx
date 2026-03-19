@@ -389,6 +389,7 @@ export default function BillingPage() {
     startLinkCard,
     startPromoSubscribe,
     checkStatus: ykCheckStatus,
+    restorePending,
     reset: ykReset,
   } = useYKBilling();
 
@@ -420,6 +421,10 @@ export default function BillingPage() {
   useEffect(() => {
     fetchPage(1, 20);
   }, [fetchPage]);
+
+  useEffect(() => {
+    restorePending();
+  }, [restorePending]);
 
   useEffect(() => {
     const linked = searchParams.get("linked");
@@ -522,7 +527,7 @@ export default function BillingPage() {
       subscriptionPeriod: pendingPlanPurchase ? period : undefined,
     });
     if (res?.confirmationUrl) {
-      window.open(res.confirmationUrl, "_blank", "noopener,noreferrer");
+      window.location.assign(res.confirmationUrl);
     }
   };
 
@@ -535,7 +540,7 @@ export default function BillingPage() {
   const handleLinkCard = async () => {
     const res = await startLinkCard();
     if (res?.confirmationUrl) {
-      window.open(res.confirmationUrl, "_blank", "noopener,noreferrer");
+      window.location.assign(res.confirmationUrl);
     }
   };
 
@@ -559,7 +564,7 @@ export default function BillingPage() {
   const handlePromoSubscribe = async (planSlug: string) => {
     const res = await startPromoSubscribe(planSlug, period);
     if (res?.confirmationUrl) {
-      window.open(res.confirmationUrl, "_blank", "noopener,noreferrer");
+      window.location.assign(res.confirmationUrl);
     }
   };
 

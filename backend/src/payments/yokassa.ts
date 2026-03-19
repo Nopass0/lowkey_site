@@ -33,6 +33,21 @@ export interface YKPaymentRequest {
   confirmation?: YKConfirmation | { type: "embedded" };
   description?: string;
   metadata?: Record<string, string>;
+  receipt?: YKReceipt;
+}
+
+export interface YKReceipt {
+  customer: {
+    email: string;
+  };
+  items: Array<{
+    description: string;
+    quantity: number;
+    amount: YKPaymentAmount;
+    vat_code: number;
+    payment_mode: "full_prepayment" | "full_payment";
+    payment_subject: "service";
+  }>;
 }
 
 export interface YKPaymentMethod {
@@ -197,6 +212,7 @@ export async function createYKRefund(
   paymentId: string,
   amount: number,
   description: string,
+  receipt?: YKReceipt,
 ): Promise<YKRefundResponse> {
   return ykRequest<YKRefundResponse>(
     "POST",
@@ -205,6 +221,7 @@ export async function createYKRefund(
       payment_id: paymentId,
       amount: { value: amount.toFixed(2), currency: "RUB" },
       description,
+      ...(receipt ? { receipt } : {}),
     },
     crypto.randomUUID(),
   );
@@ -217,11 +234,13 @@ export async function getYKPaymentMethod(
 }
 
 export async function createAutoPayment(
+  userId: string,
   methodId: string,
   amount: number,
   description: string,
   metadata?: Record<string, string>,
 ): Promise<YKPaymentResponse> {
+  const receipt = await buildYKReceipt(userId, amount, description, "full_prepayment");
   return createYKPayment(
     {
       amount: { value: amount.toFixed(2), currency: "RUB" },
@@ -229,9 +248,51 @@ export async function createAutoPayment(
       capture: true,
       description,
       metadata,
+      ...(receipt ? { receipt } : {}),
     },
     crypto.randomUUID(),
   );
+}
+
+async function getReceiptEmail(userId: string): Promise<string> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { login: true },
+  });
+
+  const login = user?.login?.trim();
+  if (login && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login)) {
+    return login;
+  }
+
+  return config.YOKASSA_RECEIPT_EMAIL;
+}
+
+export async function buildYKReceipt(
+  userId: string,
+  amount: number,
+  description: string,
+  paymentMode: "full_prepayment" | "full_payment" = "full_prepayment",
+): Promise<YKReceipt | undefined> {
+  const mode = await getYKMode();
+  if (mode !== "production") {
+    return undefined;
+  }
+
+  const email = await getReceiptEmail(userId);
+  return {
+    customer: { email },
+    items: [
+      {
+        description: description.slice(0, 128),
+        quantity: 1,
+        amount: { value: amount.toFixed(2), currency: "RUB" },
+        vat_code: 1,
+        payment_mode: paymentMode,
+        payment_subject: "service",
+      },
+    ],
+  };
 }
 
 export function getRenewalPeriodMs(period: string) {
@@ -458,6 +519,7 @@ export async function processAutoRenewals() {
       const isTest = await isYKTestMode();
 
       const ykPayment = await createAutoPayment(
+        subscription.userId,
         method.yokassaMethodId,
         charge.amount,
         `${isTest ? "[TEST] " : ""}Автопродление ${subscription.planName}`,

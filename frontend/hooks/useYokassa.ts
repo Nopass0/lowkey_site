@@ -20,11 +20,48 @@ type YKPaymentStatus = "idle" | "pending" | "success" | "failed" | "redirecting"
 
 export type YKPaymentType = "bank_card" | "sbp" | "tinkoff_bank";
 
+const PENDING_PAYMENT_STORAGE_KEY = "lowkey.pending_yk_payment";
+
+function persistPendingPayment(payload: {
+  paymentId: string;
+  confirmationUrl: string | null;
+  amount: number;
+}) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(
+    PENDING_PAYMENT_STORAGE_KEY,
+    JSON.stringify(payload),
+  );
+}
+
+function readPendingPayment():
+  | { paymentId: string; confirmationUrl: string | null; amount: number }
+  | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.sessionStorage.getItem(PENDING_PAYMENT_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as {
+      paymentId: string;
+      confirmationUrl: string | null;
+      amount: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingPayment() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(PENDING_PAYMENT_STORAGE_KEY);
+}
+
 interface YKBillingState {
   status: YKPaymentStatus;
   paymentId: string | null;
   confirmationUrl: string | null;
   amount: number | null;
+  restorePending: () => void;
 
   startTopup: (
     amount: number,
@@ -57,8 +94,14 @@ export const useYKBilling = create<YKBillingState>((set, get) => ({
         subscriptionPeriod: opts?.subscriptionPeriod,
       });
 
+      persistPendingPayment({
+        paymentId: res.paymentId,
+        confirmationUrl: res.confirmationUrl,
+        amount,
+      });
+
       set({
-        status: res.confirmationUrl ? "redirecting" : "pending",
+        status: "pending",
         paymentId: res.paymentId,
         confirmationUrl: res.confirmationUrl,
         amount,
@@ -74,8 +117,13 @@ export const useYKBilling = create<YKBillingState>((set, get) => ({
   startLinkCard: async () => {
     try {
       const res = await apiClient.post<YKLinkCardResponse>("/yokassa/link-card");
+      persistPendingPayment({
+        paymentId: res.paymentId,
+        confirmationUrl: res.confirmationUrl,
+        amount: 1,
+      });
       set({
-        status: "redirecting",
+        status: "pending",
         paymentId: res.paymentId,
         confirmationUrl: res.confirmationUrl,
         amount: 1,
@@ -93,8 +141,13 @@ export const useYKBilling = create<YKBillingState>((set, get) => ({
         "/yokassa/subscribe-promo",
         { planSlug, period },
       );
+      persistPendingPayment({
+        paymentId: res.paymentId,
+        confirmationUrl: res.confirmationUrl,
+        amount: res.promoAmount,
+      });
       set({
-        status: "redirecting",
+        status: "pending",
         paymentId: res.paymentId,
         confirmationUrl: res.confirmationUrl,
         amount: res.promoAmount,
@@ -114,10 +167,12 @@ export const useYKBilling = create<YKBillingState>((set, get) => ({
         `/yokassa/payments/${paymentId}/status`,
       );
       if (res.status === "success") {
+        clearPendingPayment();
         set({ status: "success" });
         return "success";
       }
       if (res.status === "failed" || res.status === "expired") {
+        clearPendingPayment();
         set({ status: "failed" });
         return "failed";
       }
@@ -125,8 +180,21 @@ export const useYKBilling = create<YKBillingState>((set, get) => ({
     return "pending";
   },
 
-  reset: () =>
-    set({ status: "idle", paymentId: null, confirmationUrl: null, amount: null }),
+  restorePending: () => {
+    const pending = readPendingPayment();
+    if (!pending) return;
+    set({
+      status: "pending",
+      paymentId: pending.paymentId,
+      confirmationUrl: pending.confirmationUrl,
+      amount: pending.amount,
+    });
+  },
+
+  reset: () => {
+    clearPendingPayment();
+    set({ status: "idle", paymentId: null, confirmationUrl: null, amount: null });
+  },
 }));
 
 // ── usePaymentMethods ──────────────────────────────────────────

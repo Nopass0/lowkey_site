@@ -86,6 +86,10 @@ export const config = {
   /** Public base URL of the site (for YooKassa return URL) */
   SITE_URL: process.env.SITE_URL ?? "https://lowkey.su",
 
+  /** Fallback email used for YooKassa receipts when the user has no email login */
+  YOKASSA_RECEIPT_EMAIL:
+    process.env.YOKASSA_RECEIPT_EMAIL ?? "receipts@lowkey.su",
+
   /** Server port */
   PORT: parseInt(process.env.PORT ?? "3001", 10),
 } as const;

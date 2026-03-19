@@ -9,6 +9,7 @@ import { authMiddleware } from "../auth/middleware";
 import { config } from "../config";
 import {
   autoPurchaseSubscription,
+  buildYKReceipt,
   createAutoPayment,
   createYKPayment,
   createYKRefund,
@@ -244,12 +245,19 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
           metadata.autoRenewPaymentMethodId = method.id;
 
           ykPayment = await createAutoPayment(
+            user.userId,
             method.yokassaMethodId,
             amount,
             `${isTest ? "[TEST] " : ""}Пополнение баланса lowkey`,
             metadata,
           );
         } else {
+          const receipt = await buildYKReceipt(
+            user.userId,
+            amount,
+            "Пополнение баланса lowkey",
+            "full_prepayment",
+          );
           ykPayment = await createYKPayment(
             {
               amount: { value: amount.toFixed(2), currency: "RUB" },
@@ -263,6 +271,7 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
                 return_url: YOKASSA_RETURN_URL,
               },
               metadata,
+              ...(receipt ? { receipt } : {}),
             },
             crypto.randomUUID(),
           );
@@ -334,6 +343,12 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
   .post("/link-card", async ({ user, set }) => {
     try {
       const isTest = await isYKTestMode();
+      const receipt = await buildYKReceipt(
+        user.userId,
+        1,
+        "Привязка карты lowkey",
+        "full_prepayment",
+      );
       const ykPayment = await createYKPayment(
         {
           amount: { value: "1.00", currency: "RUB" },
@@ -346,6 +361,7 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
             return_url: `${YOKASSA_RETURN_URL}?linked=1`,
           },
           metadata: { userId: user.userId, purpose: "link_card" },
+          ...(receipt ? { receipt } : {}),
         },
         crypto.randomUUID(),
       );
@@ -537,6 +553,12 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
       const isTest = await isYKTestMode();
 
       try {
+        const receipt = await buildYKReceipt(
+          user.userId,
+          plan.promoPrice,
+          `Промо-подписка ${plan.name}`,
+          "full_prepayment",
+        );
         const ykPayment = await createYKPayment(
           {
             amount: { value: plan.promoPrice.toFixed(2), currency: "RUB" },
@@ -554,6 +576,7 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
               planSlug: body.planSlug,
               period: body.period,
             },
+            ...(receipt ? { receipt } : {}),
           },
           crypto.randomUUID(),
         );
@@ -661,10 +684,17 @@ export const yokassaPaymentRoutes = new Elysia({ prefix: "/yokassa" })
       const refundAmount = Math.round(payment.amount * 0.7 * 100) / 100;
 
       try {
+        const refundReceipt = await buildYKReceipt(
+          user.userId,
+          refundAmount,
+          "Возврат пополнения баланса lowkey",
+          "full_payment",
+        );
         await createYKRefund(
           payment.yokassaPaymentId,
           refundAmount,
           `Возврат пополнения lowkey (${refundAmount} ₽ после комиссии 30%)`,
+          refundReceipt,
         );
 
         await db.$transaction(async (tx) => {
