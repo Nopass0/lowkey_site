@@ -47,6 +47,74 @@ function getReferralCodeVariants(referralCode: string): string[] {
   );
 }
 
+function sanitizeBotRedirect(target?: string | null): string {
+  if (!target) {
+    return "/me/billing";
+  }
+
+  try {
+    const decoded = decodeURIComponent(target);
+    if (!decoded.startsWith("/")) {
+      return "/me/billing";
+    }
+
+    if (decoded.startsWith("//") || decoded.includes("\r") || decoded.includes("\n")) {
+      return "/me/billing";
+    }
+
+    return decoded;
+  } catch {
+    return "/me/billing";
+  }
+}
+
+function buildBotAutologinHtml(
+  token: string,
+  user: { id: string; login: string; isAdmin: boolean },
+  redirectTo: string,
+): string {
+  const payload = JSON.stringify({
+    state: {
+      isAuthenticated: true,
+      user: {
+        id: user.id,
+        login: user.login,
+        avatarHash: avatarHash(user.login),
+        isAdmin: user.isAdmin,
+      },
+      token,
+    },
+    version: 0,
+  });
+
+  const scriptData = JSON.stringify({
+    storageKey: "lowkey-auth",
+    payload,
+    redirectTo,
+  });
+
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Авторизация...</title>
+  </head>
+  <body>
+    <p>Выполняется вход...</p>
+    <script>
+      (function () {
+        const data = ${scriptData};
+        try {
+          localStorage.setItem(data.storageKey, data.payload);
+        } catch {}
+        window.location.replace(data.redirectTo);
+      })();
+    </script>
+  </body>
+</html>`;
+}
+
 /**
  * Auth routes group.
  * Handles user login, registration, admin OTP flow, and logout.
@@ -175,6 +243,65 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       body: t.Object({
         login: t.String(),
         code: t.String(),
+      }),
+    },
+  )
+  .get(
+    "/bot-autologin/:code",
+    async ({ params, query, set }) => {
+      const redirectTo = sanitizeBotRedirect(
+        typeof query.redirect === "string" ? query.redirect : null,
+      );
+
+      const user = await db.$transaction(async (tx) => {
+        const found = await tx.user.findFirst({
+          where: {
+            botLoginCode: params.code,
+            botLoginCodeExpiresAt: { gt: new Date() },
+          },
+        });
+
+        if (!found) {
+          return null;
+        }
+
+        await tx.user.update({
+          where: { id: found.id },
+          data: {
+            botLoginCode: null,
+            botLoginCodeExpiresAt: null,
+          },
+        });
+
+        return found;
+      });
+
+      if (!user) {
+        set.status = 401;
+        set.headers["content-type"] = "text/html; charset=utf-8";
+        return "<!doctype html><html lang=\"ru\"><body><p>Ссылка недействительна или истекла.</p></body></html>";
+      }
+
+      if (user.isBanned) {
+        set.status = 403;
+        set.headers["content-type"] = "text/html; charset=utf-8";
+        return "<!doctype html><html lang=\"ru\"><body><p>Аккаунт заблокирован.</p></body></html>";
+      }
+
+      const token = await signJwt({ userId: user.id, isAdmin: Boolean(user.isAdmin) });
+      set.headers["content-type"] = "text/html; charset=utf-8";
+      return buildBotAutologinHtml(
+        token,
+        { id: user.id, login: user.login, isAdmin: Boolean(user.isAdmin) },
+        redirectTo,
+      );
+    },
+    {
+      params: t.Object({
+        code: t.String(),
+      }),
+      query: t.Object({
+        redirect: t.Optional(t.String()),
       }),
     },
   )

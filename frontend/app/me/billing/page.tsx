@@ -416,6 +416,7 @@ export default function BillingPage() {
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [timeLeft, setTimeLeft] = useState(180);
+  const intentHandledRef = useRef(false);
 
   // Fetch history + handle URL params on mount
   useEffect(() => {
@@ -435,6 +436,36 @@ export default function BillingPage() {
       if (linked === "1") setActiveTab("cards");
     }
   }, [searchParams, refetch, refetchCards]);
+
+  useEffect(() => {
+    if (intentHandledRef.current) return;
+
+    const tab = searchParams.get("tab");
+    if (tab === "plans" || tab === "cards" || tab === "history") {
+      setActiveTab(tab);
+    }
+
+    const nextPeriod = searchParams.get("period");
+    if (
+      nextPeriod === "monthly" ||
+      nextPeriod === "3months" ||
+      nextPeriod === "6months" ||
+      nextPeriod === "yearly"
+    ) {
+      setPeriod(nextPeriod);
+    }
+
+    const intent = searchParams.get("intent");
+    const amount = searchParams.get("amount");
+    if (intent === "topup") {
+      if (amount && /^\d+$/.test(amount)) {
+        setTopUpAmount(amount);
+      }
+      setIsTopUpOpen(true);
+    }
+
+    intentHandledRef.current = true;
+  }, [searchParams]);
 
   // SBP countdown timer
   useEffect(() => {
