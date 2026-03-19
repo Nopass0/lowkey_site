@@ -4,7 +4,8 @@
 
 import Elysia, { t } from "elysia";
 import { db } from "../db";
-import { authMiddleware } from "../auth/middleware";
+import { verifyJwt } from "../auth/jwt";
+import { redis } from "../redis";
 
 const PERIOD_DAYS: Record<string, number> = {
   monthly: 30,
@@ -40,12 +41,28 @@ const publicSubscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
   .get("/plans", async () => listPublicPlans())
   .get("/public-plans", async () => listPublicPlans());
 
-const privateSubscriptionRoutes = new Elysia({ prefix: "/subscriptions" })
-  .use(authMiddleware)
-  .post(
+const privateSubscriptionRoutes = new Elysia({ prefix: "/subscriptions" }).post(
     "/purchase",
-    async ({ user, body, set }) => {
+    async ({ headers, body, set }) => {
       try {
+        const token = headers.authorization?.replace("Bearer ", "");
+        if (!token) {
+          set.status = 401;
+          return { message: "Unauthorized" };
+        }
+
+        const user = await verifyJwt(token);
+        if (!user) {
+          set.status = 401;
+          return { message: "Invalid token" };
+        }
+
+        const blocked = await redis.get(`token:blocklist:${user.jti}`);
+        if (blocked) {
+          set.status = 401;
+          return { message: "Token revoked" };
+        }
+
         const { planId: slug, period } = body;
 
         const plan = await db.subscriptionPlan.findUnique({
