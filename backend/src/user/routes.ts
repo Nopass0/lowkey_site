@@ -88,6 +88,7 @@ export const userRoutes = new Elysia({ prefix: "/user" })
         avatarHash: avatarHash(dbUser.login),
         balance: dbUser.balance,
         referralBalance: dbUser.referralBalance,
+        hideAiMenu: dbUser.hideAiMenu,
         subscription: dbUser.subscription
           ? {
               planId: dbUser.subscription.planId,

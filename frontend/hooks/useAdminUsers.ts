@@ -1,15 +1,5 @@
 /**
- * @fileoverview Admin hook for managing users (list, ban, subscription edit).
- *
- * Admin-only. All methods throw if current user is not admin.
- *
- * Endpoints:
- * - GET   /admin/users               → paginated user list (with search)
- * - PATCH /admin/users/:id/ban       → toggle ban
- * - PATCH /admin/users/:id/subscription → update plan + expiry
- *
- * @example
- * const { users, total, fetchUsers, toggleBan, updateSubscription } = useAdminUsers();
+ * @fileoverview Admin hook for managing users (list, ban, preferences, subscription edit).
  */
 
 "use client";
@@ -19,11 +9,11 @@ import { apiClient } from "@/api/client";
 import { API_CONFIG } from "@/api/config";
 import type {
   AdminUser,
+  AdminUserStatsResponse,
   AdminUpdateSubscriptionRequest,
+  AdminUserFilters,
   PaginatedResponse,
 } from "@/api/types";
-
-// ── Mock data ──────────────────────────────────────────────────
 
 const MOCK_USERS: AdminUser[] = Array.from({ length: 25 }, (_, i) => {
   const names = [
@@ -53,64 +43,114 @@ const MOCK_USERS: AdminUser[] = Array.from({ length: 25 }, (_, i) => {
     "duskfall",
     "apex_v",
   ];
-  const plans = [null, "Начальный", "Рабочий", "Продвинутый"];
+  const plans = [null, "starter", "pro", "advanced"];
   const plan = plans[i % 4];
+
   return {
     id: String(i + 1),
     login: names[i],
     balance: i * 50 + 100,
     referralBalance: i * 10,
     isBanned: i % 7 === 3,
+    hideAiMenu: i % 5 === 0,
     plan,
     activeUntil: plan
       ? new Date(Date.now() + (i + 1) * 12 * 86400000).toISOString()
       : null,
     joinedAt: new Date(Date.now() - i * 15 * 86400000).toISOString(),
     deviceCount: (i % 4) + 1,
-  } satisfies AdminUser;
+  };
 });
 
-// ── Hook ───────────────────────────────────────────────────────
+function applyMockFilters(users: AdminUser[], filters: AdminUserFilters) {
+  return users.filter((user) => {
+    if (filters.search) {
+      const search = filters.search.toLowerCase();
+      if (
+        !user.login.toLowerCase().includes(search) &&
+        user.id.toLowerCase() !== search
+      ) {
+        return false;
+      }
+    }
 
-/**
- * Admin hook for user management with search and pagination.
- */
+    if (
+      typeof filters.isBanned === "boolean" &&
+      user.isBanned !== filters.isBanned
+    ) {
+      return false;
+    }
+
+    if (
+      typeof filters.hasSubscription === "boolean" &&
+      (!!user.plan !== filters.hasSubscription)
+    ) {
+      return false;
+    }
+
+    if (
+      typeof filters.hideAiMenu === "boolean" &&
+      user.hideAiMenu !== filters.hideAiMenu
+    ) {
+      return false;
+    }
+
+    if (filters.plan && user.plan !== filters.plan) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export function useAdminUsers() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
-  /**
-   * Fetch paginated user list.
-   * @param page - 1-based page number
-   * @param pageSize - items per page
-   * @param search - optional login search string
-   */
   const fetchUsers = useCallback(
-    async (page = 1, pageSize = 8, search = "") => {
+    async (
+      page = 1,
+      pageSize = 8,
+      filters: AdminUserFilters = {},
+    ) => {
       setIsLoading(true);
+
       if (API_CONFIG.debug) {
-        await new Promise((r) => setTimeout(r, 400));
-        const filtered = search
-          ? MOCK_USERS.filter((u) => u.login.includes(search.toLowerCase()))
-          : MOCK_USERS;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const filtered = applyMockFilters(MOCK_USERS, filters);
         const start = (page - 1) * pageSize;
         setUsers(filtered.slice(start, start + pageSize));
         setTotal(filtered.length);
         setIsLoading(false);
         return;
       }
+
       try {
         const query: Record<string, string | number> = { page, pageSize };
-        if (search) query.search = search;
+
+        if (filters.search) query.search = filters.search;
+        if (typeof filters.isBanned === "boolean") {
+          query.isBanned = String(filters.isBanned);
+        }
+        if (typeof filters.hasSubscription === "boolean") {
+          query.hasSubscription = String(filters.hasSubscription);
+        }
+        if (typeof filters.hideAiMenu === "boolean") {
+          query.hideAiMenu = String(filters.hideAiMenu);
+        }
+        if (filters.plan) query.plan = filters.plan;
+
         const data = await apiClient.get<PaginatedResponse<AdminUser>>(
           "/admin/users",
           query,
         );
+
         setUsers(data.items);
         setTotal(data.total);
       } catch {
         setUsers([]);
+        setTotal(0);
       } finally {
         setIsLoading(false);
       }
@@ -118,26 +158,28 @@ export function useAdminUsers() {
     [],
   );
 
-  /**
-   * Toggle ban status for a user. Uses optimistic update.
-   * @param id - user ID
-   */
   const toggleBan = useCallback(
     async (id: string) => {
+      const currentUser = users.find((user) => user.id === id);
+      if (!currentUser) return;
+
       setUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, isBanned: !u.isBanned } : u)),
+        prev.map((user) =>
+          user.id === id ? { ...user, isBanned: !user.isBanned } : user,
+        ),
       );
+
       if (!API_CONFIG.debug) {
-        const user = users.find((u) => u.id === id);
         try {
           await apiClient.patch(`/admin/users/${id}/ban`, {
-            isBanned: !user?.isBanned,
+            isBanned: !currentUser.isBanned,
           });
         } catch {
-          // Rollback
           setUsers((prev) =>
-            prev.map((u) =>
-              u.id === id ? { ...u, isBanned: user?.isBanned ?? false } : u,
+            prev.map((user) =>
+              user.id === id
+                ? { ...user, isBanned: currentUser.isBanned }
+                : user,
             ),
           );
         }
@@ -146,24 +188,19 @@ export function useAdminUsers() {
     [users],
   );
 
-  /**
-   * Update a user's subscription plan and expiry date.
-   * @param id - user ID
-   * @param plan - plan name or null to remove subscription
-   * @param activeUntil - ISO date string or null
-   */
   const updateSubscription = useCallback(
     async (id: string, plan: string | null, activeUntil: string | null) => {
       setUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, plan, activeUntil } : u)),
+        prev.map((user) =>
+          user.id === id ? { ...user, plan, activeUntil } : user,
+        ),
       );
+
       if (!API_CONFIG.debug) {
-        try {
-          await apiClient.patch(`/admin/users/${id}/subscription`, {
-            plan,
-            activeUntil,
-          } satisfies AdminUpdateSubscriptionRequest);
-        } catch {}
+        await apiClient.patch(`/admin/users/${id}/subscription`, {
+          plan,
+          activeUntil,
+        } satisfies AdminUpdateSubscriptionRequest);
       }
     },
     [],
@@ -172,15 +209,33 @@ export function useAdminUsers() {
   const updateBalance = useCallback(
     async (id: string, balance: number, referralBalance: number) => {
       setUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, balance, referralBalance } : u)),
+        prev.map((user) =>
+          user.id === id ? { ...user, balance, referralBalance } : user,
+        ),
       );
+
       if (!API_CONFIG.debug) {
-        try {
-          await apiClient.patch(`/admin/users/${id}/balance`, {
-            balance,
-            referralBalance,
-          });
-        } catch {}
+        await apiClient.patch(`/admin/users/${id}/balance`, {
+          balance,
+          referralBalance,
+        });
+      }
+    },
+    [],
+  );
+
+  const updatePreferences = useCallback(
+    async (id: string, hideAiMenu: boolean) => {
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.id === id ? { ...user, hideAiMenu } : user,
+        ),
+      );
+
+      if (!API_CONFIG.debug) {
+        await apiClient.patch(`/admin/users/${id}/preferences`, {
+          hideAiMenu,
+        });
       }
     },
     [],
@@ -194,7 +249,10 @@ export function useAdminUsers() {
         if (startDate) query.startDate = startDate;
         if (endDate) query.endDate = endDate;
 
-        return await apiClient.get<any>(`/admin/users/${id}/stats`, query);
+        return await apiClient.get<AdminUserStatsResponse>(
+          `/admin/users/${id}/stats`,
+          query,
+        );
       } finally {
         setIsLoading(false);
       }
@@ -210,6 +268,7 @@ export function useAdminUsers() {
     toggleBan,
     updateSubscription,
     updateBalance,
+    updatePreferences,
     fetchUserStats,
   };
 }

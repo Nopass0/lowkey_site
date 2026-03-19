@@ -32,6 +32,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { useUser } from "@/hooks/useUser";
 
 const userNav = [
   { title: "AI workspace", url: "/ai", icon: Brain },
@@ -62,6 +63,10 @@ adminNav.splice(adminNav.length - 1, 0, {
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth();
+  const { profile } = useUser();
+  const visibleUserNav = profile?.hideAiMenu
+    ? userNav.filter((item) => item.url !== "/ai")
+    : userNav;
 
   return (
     <Sidebar
@@ -96,7 +101,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
 
       <SidebarContent className="mt-4">
-        <NavMain items={userNav} />
+        <NavMain items={visibleUserNav} />
 
         {user?.isAdmin && (
           <>

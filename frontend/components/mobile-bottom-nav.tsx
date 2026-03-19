@@ -11,6 +11,7 @@ import {
   Home,
   Laptop,
 } from "lucide-react";
+import { useUser } from "@/hooks/useUser";
 
 const navItems = [
   { title: "AI", url: "/ai", icon: Brain },
@@ -23,11 +24,15 @@ const navItems = [
 
 export function MobileBottomNav() {
   const pathname = usePathname();
+  const { profile } = useUser();
+  const visibleNavItems = profile?.hideAiMenu
+    ? navItems.filter((item) => item.url !== "/ai")
+    : navItems;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/90 backdrop-blur-md pb-safe md:hidden">
       <nav className="flex h-16 items-center justify-around px-2">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive =
             pathname === item.url ||
             (item.url === "/ai" && pathname.startsWith("/ai"));

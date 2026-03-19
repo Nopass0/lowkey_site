@@ -7,14 +7,48 @@ import Elysia, { t } from "elysia";
 import { db } from "../../db";
 import { adminMiddleware } from "../../auth/middleware";
 
+function parseOptionalBooleanFilter(value?: string) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+function serializeAdminUser(user: {
+  id: string;
+  login: string;
+  balance: number;
+  referralBalance: number;
+  isBanned: boolean;
+  hideAiMenu: boolean;
+  joinedAt: Date;
+  subscription: {
+    planId: string;
+    activeUntil: Date;
+  } | null;
+  _count: {
+    devices: number;
+  };
+}) {
+  return {
+    id: user.id,
+    login: user.login,
+    balance: user.balance,
+    referralBalance: user.referralBalance,
+    isBanned: user.isBanned,
+    hideAiMenu: user.hideAiMenu,
+    plan: user.subscription?.planId ?? null,
+    activeUntil: user.subscription?.activeUntil.toISOString() ?? null,
+    joinedAt: user.joinedAt.toISOString(),
+    deviceCount: user._count.devices,
+  };
+}
+
 /**
  * Admin users routes group.
  * Provides user listing, ban toggle, and subscription management.
  */
 export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
   .use(adminMiddleware)
-
-  // ─── GET /admin/users ──────────────────────────────────
   .get(
     "/",
     async ({ query, set }) => {
@@ -22,11 +56,32 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         const page = parseInt(query.page ?? "1");
         const pageSize = parseInt(query.pageSize ?? "8");
         const skip = (page - 1) * pageSize;
-        const search = query.search ?? "";
+        const search = query.search?.trim() ?? "";
+        const isBanned = parseOptionalBooleanFilter(query.isBanned);
+        const hasSubscription = parseOptionalBooleanFilter(query.hasSubscription);
+        const hideAiMenu = parseOptionalBooleanFilter(query.hideAiMenu);
+        const plan = query.plan?.trim() || undefined;
 
-        const where = search
-          ? { login: { contains: search, mode: "insensitive" as const } }
-          : {};
+        const where = {
+          ...(search
+            ? {
+                OR: [
+                  { login: { contains: search, mode: "insensitive" as const } },
+                  { id: { equals: search } },
+                ],
+              }
+            : {}),
+          ...(typeof isBanned === "boolean" ? { isBanned } : {}),
+          ...(typeof hideAiMenu === "boolean" ? { hideAiMenu } : {}),
+          ...(typeof hasSubscription === "boolean"
+            ? {
+                subscription: hasSubscription
+                  ? { isNot: null }
+                  : { is: null },
+              }
+            : {}),
+          ...(plan ? { subscription: { is: { planId: plan } } } : {}),
+        };
 
         const [users, total] = await Promise.all([
           db.user.findMany({
@@ -43,17 +98,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         ]);
 
         return {
-          items: users.map((u: any) => ({
-            id: u.id,
-            login: u.login,
-            balance: u.balance,
-            referralBalance: u.referralBalance,
-            isBanned: u.isBanned,
-            plan: u.subscription?.planId ?? null,
-            activeUntil: u.subscription?.activeUntil.toISOString() ?? null,
-            joinedAt: u.joinedAt.toISOString(),
-            deviceCount: u._count.devices,
-          })),
+          items: users.map(serializeAdminUser),
           total,
           page,
           pageSize,
@@ -69,11 +114,13 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
         search: t.Optional(t.String()),
+        isBanned: t.Optional(t.String()),
+        hasSubscription: t.Optional(t.String()),
+        hideAiMenu: t.Optional(t.String()),
+        plan: t.Optional(t.String()),
       }),
     },
   )
-
-  // ─── PATCH /admin/users/:id/ban ────────────────────────
   .patch(
     "/:id/ban",
     async ({ params, body, set }) => {
@@ -87,17 +134,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           },
         });
 
-        return {
-          id: updated.id,
-          login: updated.login,
-          balance: updated.balance,
-          referralBalance: updated.referralBalance,
-          isBanned: updated.isBanned,
-          plan: updated.subscription?.planId ?? null,
-          activeUntil: updated.subscription?.activeUntil.toISOString() ?? null,
-          joinedAt: updated.joinedAt.toISOString(),
-          deviceCount: updated._count.devices,
-        };
+        return serializeAdminUser(updated);
       } catch (err) {
         set.status = 500;
         return { message: "Internal server error" };
@@ -108,40 +145,70 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
       body: t.Object({ isBanned: t.Boolean() }),
     },
   )
+  .patch(
+    "/:id/preferences",
+    async ({ params, body, set }) => {
+      try {
+        const updated = await db.user.update({
+          where: { id: params.id },
+          data: { hideAiMenu: body.hideAiMenu },
+          include: {
+            subscription: true,
+            _count: { select: { devices: true } },
+          },
+        });
 
-  // ─── PATCH /admin/users/:id/subscription ───────────────
+        return serializeAdminUser(updated);
+      } catch (err) {
+        set.status = 500;
+        return { message: "Internal server error" };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      body: t.Object({ hideAiMenu: t.Boolean() }),
+    },
+  )
   .patch(
     "/:id/subscription",
     async ({ params, body, set }) => {
       try {
         if (body.plan === null) {
-          // Remove subscription
           await db.subscription.deleteMany({
             where: { userId: params.id },
           });
         } else {
-          const planNames: Record<string, string> = {
-            starter: "Начальный",
-            pro: "Продвинутый",
-            advanced: "Максимальный",
-          };
+          const plan = await db.subscriptionPlan.findUnique({
+            where: { slug: body.plan },
+            select: { slug: true, name: true, isActive: true },
+          });
+
+          if (!plan || !plan.isActive) {
+            set.status = 400;
+            return { message: "Plan not found or inactive" };
+          }
+
+          const activeUntil = body.activeUntil
+            ? new Date(body.activeUntil)
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+          if (Number.isNaN(activeUntil.getTime())) {
+            set.status = 400;
+            return { message: "Invalid activeUntil datetime" };
+          }
 
           await db.subscription.upsert({
             where: { userId: params.id },
             update: {
-              planId: body.plan,
-              planName: planNames[body.plan] ?? body.plan,
-              activeUntil: body.activeUntil
-                ? new Date(body.activeUntil)
-                : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              planId: plan.slug,
+              planName: plan.name,
+              activeUntil,
             },
             create: {
               userId: params.id,
-              planId: body.plan,
-              planName: planNames[body.plan] ?? body.plan,
-              activeUntil: body.activeUntil
-                ? new Date(body.activeUntil)
-                : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              planId: plan.slug,
+              planName: plan.name,
+              activeUntil,
             },
           });
         }
@@ -159,17 +226,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           return { message: "User not found" };
         }
 
-        return {
-          id: updated.id,
-          login: updated.login,
-          balance: updated.balance,
-          referralBalance: updated.referralBalance,
-          isBanned: updated.isBanned,
-          plan: updated.subscription?.planId ?? null,
-          activeUntil: updated.subscription?.activeUntil.toISOString() ?? null,
-          joinedAt: updated.joinedAt.toISOString(),
-          deviceCount: updated._count.devices,
-        };
+        return serializeAdminUser(updated);
       } catch (err) {
         set.status = 500;
         return { message: "Internal server error" };
@@ -183,8 +240,6 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
       }),
     },
   )
-
-  // ─── PATCH /admin/users/:id/balance ──────────────────────
   .patch(
     "/:id/balance",
     async ({ params, body, set }) => {
@@ -201,17 +256,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           },
         });
 
-        return {
-          id: updated.id,
-          login: updated.login,
-          balance: updated.balance,
-          referralBalance: updated.referralBalance,
-          isBanned: updated.isBanned,
-          plan: updated.subscription?.planId ?? null,
-          activeUntil: updated.subscription?.activeUntil.toISOString() ?? null,
-          joinedAt: updated.joinedAt.toISOString(),
-          deviceCount: updated._count.devices,
-        };
+        return serializeAdminUser(updated);
       } catch (err) {
         set.status = 500;
         return { message: "Internal server error" };
@@ -225,7 +270,6 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
       }),
     },
   )
-  // ─── GET /admin/users/:id/stats ──────────────────────────
   .get(
     "/:id/stats",
     async ({ params, query, set }) => {
@@ -249,7 +293,6 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           return { message: "User not found" };
         }
 
-        // Get daily referrals
         const referrals = await db.user.findMany({
           where: {
             referredById: userId,
@@ -258,7 +301,6 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           select: { joinedAt: true },
         });
 
-        // Get transactions for the period
         const transactions = await db.transaction.findMany({
           where: {
             userId,
@@ -267,13 +309,11 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           orderBy: { createdAt: "desc" },
         });
 
-        // Group by day helper
         const dailyStats: Record<
           string,
           { referrals: number; referralEarnings: number; topups: number }
         > = {};
 
-        // Initialize days
         const curr = new Date(startDate);
         while (curr <= endDate) {
           const day = curr.toISOString().split("T")[0];
@@ -286,12 +326,15 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           if (dailyStats[day]) dailyStats[day].referrals++;
         });
 
-        transactions.forEach((t) => {
-          const day = t.createdAt.toISOString().split("T")[0];
+        transactions.forEach((transaction) => {
+          const day = transaction.createdAt.toISOString().split("T")[0];
           if (dailyStats[day]) {
-            if (t.type === "referral_earning")
-              dailyStats[day].referralEarnings += t.amount;
-            if (t.type === "topup") dailyStats[day].topups += t.amount;
+            if (transaction.type === "referral_earning") {
+              dailyStats[day].referralEarnings += transaction.amount;
+            }
+            if (transaction.type === "topup") {
+              dailyStats[day].topups += transaction.amount;
+            }
           }
         });
 
@@ -302,6 +345,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
             balance: user.balance,
             referralBalance: user.referralBalance,
             isBanned: user.isBanned,
+            hideAiMenu: user.hideAiMenu,
             plan: user.subscription?.planId ?? null,
             activeUntil: user.subscription?.activeUntil.toISOString() ?? null,
             joinedAt: user.joinedAt.toISOString(),
@@ -314,12 +358,12 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
               ...stats,
             }))
             .sort((a, b) => a.date.localeCompare(b.date)),
-          transactions: transactions.map((t) => ({
-            id: t.id,
-            type: t.type,
-            amount: t.amount,
-            title: t.title,
-            createdAt: t.createdAt.toISOString(),
+          transactions: transactions.map((transaction) => ({
+            id: transaction.id,
+            type: transaction.type,
+            amount: transaction.amount,
+            title: transaction.title,
+            createdAt: transaction.createdAt.toISOString(),
           })),
         };
       } catch (err) {

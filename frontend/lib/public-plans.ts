@@ -50,9 +50,9 @@ export async function fetchPublicPlans(): Promise<SubscriptionPlan[]> {
     }
 
     const data = (await response.json()) as SubscriptionPlan[];
-    return data.length > 0 ? data : fallbackPlans;
+    return data;
   } catch {
-    return fallbackPlans;
+    return [];
   }
 }
 
@@ -63,6 +63,5 @@ export function getLowestDisplayedPlanPrice(plans: SubscriptionPlan[]): number {
     ),
   );
 
-  return prices.length > 0 ? Math.min(...prices) : 79;
+  return prices.length > 0 ? Math.min(...prices) : 0;
 }
-

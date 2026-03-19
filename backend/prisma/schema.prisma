@@ -15,6 +15,7 @@ model User {
   referralBalance           Float             @default(0)
   isBanned                  Boolean           @default(false)
   isAdmin                   Boolean           @default(false)
+  hideAiMenu                Boolean           @default(false)
   referralCode              String            @unique
   referredById              String?
   joinedAt                  DateTime          @default(now())

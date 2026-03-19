@@ -16,31 +16,34 @@ export function LandingBanner({ lowestPrice }: LandingBannerProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     let animationFrameId: number;
-    let w = (canvas.width = window.innerWidth);
-    let h = (canvas.height = window.innerHeight * 0.7);
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight * 0.7);
 
     const resize = () => {
-      w = canvas.width = window.innerWidth;
-      h = canvas.height = window.innerHeight * 0.7;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight * 0.7;
     };
+
     window.addEventListener("resize", resize);
 
     const pixelSize = 16;
     const pixels: Array<{ val: number; target: number; speed: number }> = [];
 
     const draw = () => {
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, width, height);
 
-      const currentCols = Math.floor(w / pixelSize);
-      const currentRows = Math.floor(h / pixelSize);
+      const currentCols = Math.floor(width / pixelSize);
+      const currentRows = Math.floor(height / pixelSize);
 
       for (let i = 0; i < currentCols; i++) {
         for (let j = 0; j < currentRows; j++) {
           const idx = i + j * currentCols;
+
           if (!pixels[idx]) {
             pixels[idx] = {
               val: Math.random() * 0.5,
@@ -107,17 +110,19 @@ export function LandingBanner({ lowestPrice }: LandingBannerProps) {
           <span className="bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-primary text-transparent">
             lowkey
           </span>{" "}
-          — защищенное соединение и оптимизация интернет-маршрутов
+          - защищенное соединение и оптимизация интернет-маршрутов
         </motion.h1>
 
         <motion.p
-          className="mt-6 mb-2 text-3xl font-extrabold leading-tight text-foreground sm:text-4xl md:text-5xl"
+          className="mb-2 mt-6 text-3xl font-extrabold leading-tight text-foreground sm:text-4xl md:text-5xl"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <span className="text-primary tracking-tight">
-            от {lowestPrice} рублей в месяц
+          <span className="tracking-tight text-primary">
+            {lowestPrice > 0
+              ? `от ${lowestPrice} рублей в месяц`
+              : "Актуальные цены в личном кабинете"}
           </span>
         </motion.p>
 
@@ -137,7 +142,7 @@ export function LandingBanner({ lowestPrice }: LandingBannerProps) {
         >
           <Button
             size="lg"
-            className="group cursor-pointer rounded-full px-8 py-7 text-lg font-bold shadow-[0_0_40px_-10px_rgba(59,130,246,0.6)] transition-all hover:scale-105 outline-none"
+            className="group cursor-pointer rounded-full px-8 py-7 text-lg font-bold shadow-[0_0_40px_-10px_rgba(59,130,246,0.6)] outline-none transition-all hover:scale-105"
             onClick={() => {
               setPlan("advanced", "yearly");
               setAuthModalOpen(true);

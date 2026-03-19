@@ -101,6 +101,7 @@ export interface UserProfile {
   avatarHash: string;
   balance: number;
   referralBalance: number;
+  hideAiMenu: boolean;
   subscription: Subscription | null;
   joinedAt: string;
   telegramId: string | null;
@@ -444,6 +445,7 @@ export interface AdminUser {
   balance: number;
   referralBalance: number;
   isBanned: boolean;
+  hideAiMenu: boolean;
   plan: string | null;
   activeUntil: string | null;
   joinedAt: string;
@@ -454,6 +456,14 @@ export interface AdminUser {
 export interface AdminUpdateSubscriptionRequest {
   plan: string | null;
   activeUntil: string | null;
+}
+
+export interface AdminUserFilters {
+  search?: string;
+  isBanned?: boolean;
+  hasSubscription?: boolean;
+  hideAiMenu?: boolean;
+  plan?: string;
 }
 
 // ─────────────────────────────────────────────

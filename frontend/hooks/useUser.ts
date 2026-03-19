@@ -30,6 +30,7 @@ const MOCK_PROFILE: UserProfile = {
   avatarHash: "7A3F8Cff",
   balance: 1500,
   referralBalance: 120,
+  hideAiMenu: false,
   subscription: {
     planId: "pro",
     planName: "Рабочий",
