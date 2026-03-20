@@ -1252,30 +1252,31 @@ export default function BillingPage() {
                         </CardContent>
 
                         <CardFooter className="px-5 pb-5 pt-2 flex flex-col gap-2">
-                          <Button
-                            className="w-full h-11 rounded-xl font-bold shadow-none cursor-pointer"
-                            variant={plan.isPopular ? "default" : "secondary"}
-                            onClick={() =>
-                              handleSubscribe(
-                                plan.id,
-                                totalCost,
-                              )
-                            }
-                          >
-                            {canAfford
-                              ? "Купить тариф"
-                              : `Пополнить на ${totalCost - profile.balance} ₽`}
-                          </Button>
-
-                          {/* Promo subscribe button */}
                           {hasPromo && (
                             <Button
-                              variant="outline"
-                              className="w-full h-10 rounded-xl font-semibold shadow-none cursor-pointer border-orange-500/40 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/20 text-sm"
+                              className="w-full h-11 rounded-xl font-bold shadow-none cursor-pointer"
+                              variant={plan.isPopular ? "default" : "secondary"}
                               onClick={() => handlePromoSubscribe(plan.id)}
                             >
                               <Tag className="w-3.5 h-3.5 mr-1.5" />
                               Оформить за {plan.promoPrice} ₽
+                            </Button>
+                          )}
+
+                          {!hasPromo && (
+                            <Button
+                              className="w-full h-11 rounded-xl font-bold shadow-none cursor-pointer"
+                              variant={plan.isPopular ? "default" : "secondary"}
+                              onClick={() =>
+                                handleSubscribe(
+                                  plan.id,
+                                  totalCost,
+                                )
+                              }
+                            >
+                              {canAfford
+                                ? "Купить тариф"
+                                : `Пополнить на ${totalCost - profile.balance} ₽`}
                             </Button>
                           )}
                         </CardFooter>
