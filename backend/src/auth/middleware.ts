@@ -9,6 +9,40 @@ import { Elysia } from "elysia";
 import { verifyJwt } from "./jwt";
 import { redis } from "../redis";
 
+async function authenticateRequest(
+  headers: Record<string, string | undefined>,
+  set: { status?: number | string },
+) {
+  const token = headers.authorization?.replace("Bearer ", "");
+  if (!token) {
+    set.status = 401;
+    throw new Error("Unauthorized");
+  }
+
+  const payload = await verifyJwt(token);
+  if (!payload) {
+    set.status = 401;
+    throw new Error("Invalid token");
+  }
+
+  let blocked: string | null = null;
+  try {
+    blocked = await redis.get(`token:blocklist:${payload.jti}`);
+  } catch (error) {
+    console.error("[Auth] Redis blocklist check failed:", error);
+  }
+
+  if (blocked) {
+    set.status = 401;
+    throw new Error("Token revoked");
+  }
+
+  return {
+    user: payload,
+    token,
+  };
+}
+
 /**
  * Auth middleware for regular authenticated users.
  * Extracts and verifies the Bearer token from the Authorization header.
@@ -17,34 +51,7 @@ import { redis } from "../redis";
  */
 export const authMiddleware = new Elysia({ name: "auth" }).derive(
   { as: "scoped" },
-  async ({ headers, set }) => {
-    const token = headers.authorization?.replace("Bearer ", "");
-    if (!token) {
-      set.status = 401;
-      throw new Error("Unauthorized");
-    }
-
-    const payload = await verifyJwt(token);
-    if (!payload) {
-      set.status = 401;
-      throw new Error("Invalid token");
-    }
-
-    try {
-      const blocked = await redis.get(`token:blocklist:${payload.jti}`);
-      if (blocked) {
-        set.status = 401;
-        throw new Error("Token revoked");
-      }
-    } catch (error) {
-      console.error("[Auth] Redis blocklist check failed:", error);
-    }
-
-    return {
-      user: payload,
-      token,
-    };
-  },
+  async ({ headers, set }) => authenticateRequest(headers, set),
 );
 
 /**
@@ -53,12 +60,15 @@ export const authMiddleware = new Elysia({ name: "auth" }).derive(
  * Returns 403 Forbidden if the user is not an admin.
  */
 export const adminMiddleware = new Elysia({ name: "admin-auth" })
-  .use(authMiddleware)
-  .derive({ as: "scoped" }, async ({ user, set }) => {
-    if (!user || !user.isAdmin) {
+  .derive({ as: "scoped" }, async ({ headers, set }) => {
+    const auth = await authenticateRequest(headers, set);
+    if (!auth.user.isAdmin) {
       set.status = 403;
       throw new Error("Forbidden");
     }
 
-    return { adminUser: user };
+    return {
+      ...auth,
+      adminUser: auth.user,
+    };
   });

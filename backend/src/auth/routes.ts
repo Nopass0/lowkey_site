@@ -145,6 +145,24 @@ function buildBotAutologinHtml(
 </html>`;
 }
 
+function buildAuthResponse(user: {
+  id: string;
+  login: string;
+  isAdmin?: boolean | null;
+}) {
+  const isAdmin = Boolean(user.isAdmin);
+
+  return {
+    user: {
+      id: user.id,
+      login: user.login,
+      avatarHash: avatarHash(user.login),
+      isAdmin,
+    },
+    isAdmin,
+  };
+}
+
 async function createBotPaymentAction(params: {
   userId: string;
   action?: string;
@@ -554,16 +572,15 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           return { message: "Wrong password" };
         }
 
-        const token = await signJwt({ userId: user.id, isAdmin: false });
+        const auth = buildAuthResponse(user);
+        const token = await signJwt({
+          userId: user.id,
+          isAdmin: auth.isAdmin,
+        });
 
         return {
           token,
-          user: {
-            id: user.id,
-            login: user.login,
-            avatarHash: avatarHash(user.login),
-            isAdmin: false,
-          },
+          user: auth.user,
         };
       } catch (err) {
         set.status = 500;
@@ -607,15 +624,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           data: { botLoginCode: null, botLoginCodeExpiresAt: null },
         });
 
-        const token = await signJwt({ userId: user.id, isAdmin: false });
+        const auth = buildAuthResponse(user);
+        const token = await signJwt({
+          userId: user.id,
+          isAdmin: auth.isAdmin,
+        });
         return {
           token,
-          user: {
-            id: user.id,
-            login: user.login,
-            avatarHash: avatarHash(user.login),
-            isAdmin: false,
-          },
+          user: auth.user,
         };
       } catch (err) {
         set.status = 500;
@@ -895,23 +911,25 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
               login,
               passwordHash,
               referralCode,
+              isAdmin: true,
             },
+          });
+        } else if (!adminUser.isAdmin) {
+          adminUser = await db.user.update({
+            where: { id: adminUser.id },
+            data: { isAdmin: true },
           });
         }
 
+        const auth = buildAuthResponse(adminUser);
         const token = await signJwt(
-          { userId: adminUser.id, isAdmin: true },
+          { userId: adminUser.id, isAdmin: auth.isAdmin },
           config.ADMIN_JWT_EXPIRY,
         );
 
         return {
           token,
-          user: {
-            id: adminUser.id,
-            login: adminUser.login,
-            avatarHash: avatarHash(adminUser.login),
-            isAdmin: true,
-          },
+          user: auth.user,
         };
       } catch (err) {
         set.status = 500;
