@@ -40,6 +40,8 @@ export interface PrismaLikeClient {
   user: PrismaDelegate;
   device: PrismaDelegate;
   vpnToken: PrismaDelegate;
+  vpnSession: PrismaDelegate;
+  vpnUserProtocolStat: PrismaDelegate;
   subscriptionPlan: PrismaDelegate;
   subscriptionPrice: PrismaDelegate;
   subscription: PrismaDelegate;
@@ -63,6 +65,8 @@ export interface PrismaLikeClient {
   aiMessage: PrismaDelegate;
   aiUsageEntry: PrismaDelegate;
   aiFile: PrismaDelegate;
+  vpnDomainStats: PrismaDelegate;
+  mtprotoSettings: PrismaDelegate;
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: PrismaLikeClient) => Promise<T>): Promise<T>;
   $transaction<T>(operations: Promise<T>[]): Promise<T[]>;
@@ -73,6 +77,8 @@ type ModelName =
   | "user"
   | "device"
   | "vpnToken"
+  | "vpnSession"
+  | "vpnUserProtocolStat"
   | "subscriptionPlan"
   | "subscriptionPrice"
   | "subscription"
@@ -95,7 +101,9 @@ type ModelName =
   | "aiConversation"
   | "aiMessage"
   | "aiUsageEntry"
-  | "aiFile";
+  | "aiFile"
+  | "vpnDomainStats"
+  | "mtprotoSettings";
 
 type RelationConfig = {
   model: ModelName;
@@ -157,6 +165,10 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "referralRate",
       "aiPurchasedTokens",
       "aiFreeTokensUsed",
+      "vpnMaxDevices",
+      "vpnMaxConcurrentConnections",
+      "vpnSpeedLimitUpMbps",
+      "vpnSpeedLimitDownMbps",
     ],
     dateFields: ["joinedAt", "botLoginCodeExpiresAt", "telegramLinkCodeExpiresAt"],
     bigintFields: ["telegramId"],
@@ -185,6 +197,45 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       device: { model: "device", type: "one", localField: "deviceId", foreignField: "id" },
     },
   },
+  vpnSession: {
+    collection: "vpn_sessions",
+    fields: [
+      "id",
+      "userId",
+      "protocol",
+      "serverId",
+      "serverIp",
+      "deviceId",
+      "deviceName",
+      "deviceOs",
+      "clientVersion",
+      "vip",
+      "remoteAddr",
+      "status",
+      "connectedAt",
+      "lastSeenAt",
+      "disconnectedAt",
+      "bytesUp",
+      "bytesDown",
+    ],
+    dateFields: ["connectedAt", "lastSeenAt", "disconnectedAt"],
+  },
+  vpnUserProtocolStat: {
+    collection: "vpn_user_protocol_stats",
+    fields: [
+      "id",
+      "userId",
+      "protocol",
+      "sessionCount",
+      "activeConnections",
+      "totalBytesUp",
+      "totalBytesDown",
+      "lastSeenAt",
+      "lastDeviceId",
+      "lastServerId",
+    ],
+    dateFields: ["lastSeenAt"],
+  },
   subscriptionPlan: {
     collection: "subscription_plans",
     fields: [
@@ -192,6 +243,10 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "slug",
       "name",
       "features",
+      "maxDevices",
+      "maxConcurrentConnections",
+      "speedLimitUpMbps",
+      "speedLimitDownMbps",
       "isPopular",
       "isActive",
       "sortOrder",
@@ -517,6 +572,16 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
     fields: ["id", "userId", "conversationId", "messageId", "fileName", "mimeType", "size", "blobUrl", "kind", "createdAt"],
     dateFields: ["createdAt"],
   },
+  vpnDomainStats: {
+    collection: "vpn_domain_stats",
+    fields: ["id", "userId", "domain", "visitCount", "bytesTransferred", "firstVisitAt", "lastVisitAt"],
+    dateFields: ["firstVisitAt", "lastVisitAt"],
+  },
+  mtprotoSettings: {
+    collection: "mtproto_settings",
+    fields: ["id", "enabled", "port", "secret", "channelUsername", "botUsername", "addChannelOnConnect", "createdAt", "updatedAt"],
+    dateFields: ["createdAt", "updatedAt"],
+  },
 };
 
 const UPDATE_TIMESTAMP_MODELS = new Set<ModelName>([
@@ -530,6 +595,7 @@ const UPDATE_TIMESTAMP_MODELS = new Set<ModelName>([
   "aiSettings",
   "aiSubscription",
   "aiConversation",
+  "mtprotoSettings",
 ]);
 
 function isPlainObject(value: unknown): value is AnyRecord {
@@ -689,9 +755,29 @@ function withCreateDefaults(model: ModelName, data: AnyRecord): AnyRecord {
         createdAt: now,
       });
       break;
+    case "vpnSession":
+      Object.assign(defaults, {
+        status: "active",
+        connectedAt: now,
+        lastSeenAt: now,
+        bytesUp: 0,
+        bytesDown: 0,
+      });
+      break;
+    case "vpnUserProtocolStat":
+      Object.assign(defaults, {
+        sessionCount: 0,
+        activeConnections: 0,
+        totalBytesUp: 0,
+        totalBytesDown: 0,
+        lastSeenAt: now,
+      });
+      break;
     case "subscriptionPlan":
       Object.assign(defaults, {
         features: [],
+        maxDevices: 1,
+        maxConcurrentConnections: 1,
         isPopular: false,
         isActive: true,
         sortOrder: 0,
@@ -1697,6 +1783,8 @@ class VoidPrismaClient implements PrismaLikeClient {
   user = new VoidPrismaDelegate("user");
   device = new VoidPrismaDelegate("device");
   vpnToken = new VoidPrismaDelegate("vpnToken");
+  vpnSession = new VoidPrismaDelegate("vpnSession");
+  vpnUserProtocolStat = new VoidPrismaDelegate("vpnUserProtocolStat");
   subscriptionPlan = new VoidPrismaDelegate("subscriptionPlan");
   subscriptionPrice = new VoidPrismaDelegate("subscriptionPrice");
   subscription = new VoidPrismaDelegate("subscription");
@@ -1720,6 +1808,8 @@ class VoidPrismaClient implements PrismaLikeClient {
   aiMessage = new VoidPrismaDelegate("aiMessage");
   aiUsageEntry = new VoidPrismaDelegate("aiUsageEntry");
   aiFile = new VoidPrismaDelegate("aiFile");
+  vpnDomainStats = new VoidPrismaDelegate("vpnDomainStats");
+  mtprotoSettings = new VoidPrismaDelegate("mtprotoSettings");
 
   async $disconnect() {
     return;

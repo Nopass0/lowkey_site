@@ -7,6 +7,7 @@ import Elysia, { t } from "elysia";
 import { db } from "../db";
 import { redis } from "../redis";
 import { authMiddleware } from "../auth/middleware";
+import { resolveVpnPolicyForUser } from "../vpn/policy";
 
 /**
  * Retrieves Redis online status for a device.
@@ -157,6 +158,7 @@ export const deviceRoutes = new Elysia({ prefix: "/user/devices" })
         // If blocking, remove online status from Redis
         if (body.isBlocked) {
           await redis.del(`device:online:${params.id}`);
+          await db.vpnToken.deleteMany({ where: { deviceId: params.id } });
         }
 
         const status = await getDeviceOnlineStatus(updated.id);
@@ -218,18 +220,29 @@ export const deviceRoutes = new Elysia({ prefix: "/user/devices" })
           return { message: "Нет активной подписки" };
         }
 
-        // 3. Check device limits based on plan
-        const planLimits: Record<string, number> = {
-          starter: 1,
-          pro: 3,
-          advanced: 5,
-        };
-        const maxDevices = planLimits[sub.planId] ?? 1;
+        const policy = await resolveVpnPolicyForUser(user.userId, {
+          planId: sub.planId,
+        });
 
-        // Note: Currently we don't strictly enforce max active devices *logging in*,
-        // but we can check how many *tokens* they have or just allow it and let the
-        // VPN server drop old connections if they exceed limits.
-        // For now, we issue the token freely as long as the sub is valid.
+        const existingToken = await db.vpnToken.findFirst({
+          where: {
+            userId: user.userId,
+            deviceId: device.id,
+          },
+        });
+
+        if (!existingToken) {
+          const activeDeviceTokens = await db.vpnToken.count({
+            where: { userId: user.userId },
+          });
+
+          if (activeDeviceTokens >= policy.effective.maxDevices) {
+            set.status = 403;
+            return {
+              message: `Достигнут лимит устройств для тарифа (${policy.effective.maxDevices})`,
+            };
+          }
+        }
 
         // Generate a secure random token
         const rawToken =
@@ -260,6 +273,7 @@ export const deviceRoutes = new Elysia({ prefix: "/user/devices" })
           success: true,
           token: token.token,
           expiresAt: token.expiresAt.toISOString(),
+          limits: policy.effective,
         };
       } catch (err: any) {
         console.error("[Token Issuance Error]:", err);

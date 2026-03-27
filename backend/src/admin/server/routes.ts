@@ -57,6 +57,47 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
     },
   )
 
+  // ─── GET /admin/server/mtproto ───────────────────────
+  .get("/mtproto", async ({ set }) => {
+    try {
+      const settings = await db.mtprotoSettings.findFirst({});
+      return settings ?? {
+        id: "global", enabled: false, port: 443,
+        secret: null, channelUsername: null, botUsername: null, addChannelOnConnect: false,
+      };
+    } catch (err) {
+      set.status = 500;
+      return { message: "Internal server error" };
+    }
+  })
+
+  // ─── PATCH /admin/server/mtproto ─────────────────────
+  .patch(
+    "/mtproto",
+    async ({ body, set }) => {
+      try {
+        const existing = await db.mtprotoSettings.findFirst({});
+        if (existing) {
+          return await db.mtprotoSettings.update({ where: { id: "global" }, data: body });
+        }
+        return await db.mtprotoSettings.create({ data: { id: "global", ...body } });
+      } catch (err) {
+        set.status = 500;
+        return { message: "Internal server error" };
+      }
+    },
+    {
+      body: t.Object({
+        enabled: t.Optional(t.Boolean()),
+        port: t.Optional(t.Number()),
+        secret: t.Optional(t.Nullable(t.String())),
+        channelUsername: t.Optional(t.Nullable(t.String())),
+        botUsername: t.Optional(t.Nullable(t.String())),
+        addChannelOnConnect: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+
   // ─── DELETE /admin/server/:id ────────────────────────
   .delete("/:id", async ({ params, set }) => {
     try {

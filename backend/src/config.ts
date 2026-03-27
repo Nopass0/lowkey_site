@@ -21,6 +21,9 @@ export const config = {
   JWT_SECRET:
     process.env.JWT_SECRET ?? "your-secret-key-min-32-chars-change-me",
 
+  /** Shared secret used by VPN nodes for /servers/* write endpoints */
+  BACKEND_SECRET: process.env.BACKEND_SECRET ?? "",
+
   /** JWT token expiry for regular users */
   JWT_EXPIRY: process.env.JWT_EXPIRY ?? "30d",
 

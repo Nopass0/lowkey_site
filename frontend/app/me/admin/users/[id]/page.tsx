@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Users,
   Wallet,
   History,
-  Calendar,
   TrendingUp,
   CreditCard,
   User as UserIcon,
@@ -15,20 +14,42 @@ import {
   Activity,
   ArrowUpRight,
   ArrowDownRight,
+  Globe,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { AdminUserStatsResponse } from "@/api/types";
 import { Loader } from "@/components/ui/loader";
+import { DomainStats } from "@/components/admin/domain-stats";
 import {
   AreaChart,
   Area,
   XAxis,
-  YAxis,
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { apiClient } from "@/api/client";
+import { toast } from "sonner";
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = value;
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  return `${current.toFixed(current >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatLimitValue(value: number | null, suffix: string, empty = "Без лимита") {
+  return value == null ? empty : `${value} ${suffix}`;
+}
 
 export default function AdminUserDetailsPage() {
   const params = useParams();
@@ -44,8 +65,15 @@ export default function AdminUserDetailsPage() {
   const [endDate, setEndDate] = useState(
     new Date().toISOString().split("T")[0],
   );
+  const [vpnLimitsForm, setVpnLimitsForm] = useState({
+    vpnMaxDevices: "",
+    vpnMaxConcurrentConnections: "",
+    vpnSpeedLimitUpMbps: "",
+    vpnSpeedLimitDownMbps: "",
+  });
+  const [isSavingVpnLimits, setIsSavingVpnLimits] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const res = await fetchUserStats(id, startDate, endDate);
       setData(res);
@@ -54,11 +82,26 @@ export default function AdminUserDetailsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [endDate, fetchUserStats, id, startDate]);
 
   useEffect(() => {
     loadData();
-  }, [id, startDate, endDate]);
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!data) return;
+    setVpnLimitsForm({
+      vpnMaxDevices:
+        data.user.vpnPolicy.userOverrides.maxDevices?.toString() ?? "",
+      vpnMaxConcurrentConnections:
+        data.user.vpnPolicy.userOverrides.maxConcurrentConnections?.toString() ??
+        "",
+      vpnSpeedLimitUpMbps:
+        data.user.vpnPolicy.userOverrides.speedLimitUpMbps?.toString() ?? "",
+      vpnSpeedLimitDownMbps:
+        data.user.vpnPolicy.userOverrides.speedLimitDownMbps?.toString() ?? "",
+    });
+  }, [data]);
 
   const stats = useMemo(() => {
     if (!data) return null;
@@ -75,6 +118,67 @@ export default function AdminUserDetailsPage() {
     };
   }, [data]);
 
+  const currentSites = useMemo(() => {
+    if (!data) return [];
+    return (data.activeDomains ?? [])
+      .slice()
+      .sort((a, b) => {
+        const left = a.lastVisitAt ? new Date(a.lastVisitAt).getTime() : 0;
+        const right = b.lastVisitAt ? new Date(b.lastVisitAt).getTime() : 0;
+        return right - left;
+      })
+      .slice(0, 8);
+  }, [data]);
+
+  const handleSaveVpnLimits = async () => {
+    const parseValue = (raw: string) => {
+      const value = raw.trim();
+      if (!value) return null;
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error("Все лимиты должны быть положительными числами");
+      }
+      return parsed;
+    };
+
+    try {
+      const payload = {
+        vpnMaxDevices: parseValue(vpnLimitsForm.vpnMaxDevices),
+        vpnMaxConcurrentConnections: parseValue(
+          vpnLimitsForm.vpnMaxConcurrentConnections,
+        ),
+        vpnSpeedLimitUpMbps: parseValue(vpnLimitsForm.vpnSpeedLimitUpMbps),
+        vpnSpeedLimitDownMbps: parseValue(vpnLimitsForm.vpnSpeedLimitDownMbps),
+      };
+
+      setIsSavingVpnLimits(true);
+
+      const res = await apiClient.patch<{
+        success: boolean;
+        vpnPolicy: AdminUserStatsResponse["user"]["vpnPolicy"];
+      }>(`/admin/users/${id}/vpn-limits`, payload);
+
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              user: {
+                ...prev.user,
+                vpnPolicy: res.vpnPolicy,
+              },
+            }
+          : prev,
+      );
+      toast.success("VPN-лимиты сохранены");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Не удалось сохранить лимиты";
+      toast.error(message);
+    } finally {
+      setIsSavingVpnLimits(false);
+    }
+  };
+
   if (loading && !data) {
     return (
       <div className="flex h-[400px] items-center justify-center">
@@ -84,6 +188,9 @@ export default function AdminUserDetailsPage() {
   }
 
   if (!data) return null;
+
+  const totalVpnBytes =
+    data.vpn.totals.totalBytesUp + data.vpn.totals.totalBytesDown;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
@@ -184,6 +291,410 @@ export default function AdminUserDetailsPage() {
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="space-y-6">
+        <h2 className="text-2xl font-black tracking-tight flex items-center gap-3">
+          <Activity className="w-6 h-6 text-primary" />
+          VPN телеметрия
+        </h2>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6">
+          <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-black tracking-tight flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-primary" />
+                  Сайты сейчас
+                </h3>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">
+                  Активность за последние 2 минуты
+                </p>
+              </div>
+              <Badge variant="outline" className="rounded-full">
+                {currentSites.length} active
+              </Badge>
+            </div>
+
+            {currentSites.length === 0 ? (
+              <div className="rounded-[1.5rem] border border-dashed border-border/70 px-5 py-8 text-sm italic text-muted-foreground">
+                Сейчас нет доменов с новой VPN-активностью.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {currentSites.map((site) => (
+                  <div
+                    key={`${site.domain}:${site.lastVisitAt ?? "none"}`}
+                    className="rounded-[1.5rem] border border-border/50 px-5 py-4 flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-black truncate">{site.domain}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {site.lastVisitAt
+                          ? new Date(site.lastVisitAt).toLocaleTimeString("ru-RU")
+                          : "no timestamp"}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-black tabular-nums">
+                        {site.visitCount}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatBytes(site.bytesTransferred)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-black tracking-tight">
+                  VPN-лимиты пользователя
+                </h3>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">
+                  Пустое значение = взять из тарифа
+                </p>
+              </div>
+              <Badge variant="outline" className="rounded-full">
+                {data.user.plan ?? "no-plan"}
+              </Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="rounded-full">
+                {data.vpn.totals.activeConnections} conn now
+              </Badge>
+              <Badge variant="outline" className="rounded-full">
+                {data.vpn.totals.activeDeviceCount} devices now
+              </Badge>
+              <Badge variant="outline" className="rounded-full">
+                {data.user.deviceCount} registered
+              </Badge>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2">
+                  По тарифу
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary" className="rounded-full">
+                    {data.user.vpnPolicy.planDefaults.maxDevices} devices
+                  </Badge>
+                  <Badge variant="secondary" className="rounded-full">
+                    {data.user.vpnPolicy.planDefaults.maxConcurrentConnections} conn
+                  </Badge>
+                  <Badge variant="secondary" className="rounded-full">
+                    {formatLimitValue(
+                      data.user.vpnPolicy.planDefaults.speedLimitUpMbps,
+                      "Mbps up",
+                    )}
+                  </Badge>
+                  <Badge variant="secondary" className="rounded-full">
+                    {formatLimitValue(
+                      data.user.vpnPolicy.planDefaults.speedLimitDownMbps,
+                      "Mbps down",
+                    )}
+                  </Badge>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground mb-2">
+                  Итого действует
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="rounded-full">
+                    {data.user.vpnPolicy.effective.maxDevices} devices
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {data.user.vpnPolicy.effective.maxConcurrentConnections} conn
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {formatLimitValue(
+                      data.user.vpnPolicy.effective.speedLimitUpMbps,
+                      "Mbps up",
+                    )}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {formatLimitValue(
+                      data.user.vpnPolicy.effective.speedLimitDownMbps,
+                      "Mbps down",
+                    )}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Override: max devices</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={vpnLimitsForm.vpnMaxDevices}
+                  onChange={(e) =>
+                    setVpnLimitsForm((prev) => ({
+                      ...prev,
+                      vpnMaxDevices: e.target.value,
+                    }))
+                  }
+                  placeholder="Из тарифа"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Override: max concurrent</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={vpnLimitsForm.vpnMaxConcurrentConnections}
+                  onChange={(e) =>
+                    setVpnLimitsForm((prev) => ({
+                      ...prev,
+                      vpnMaxConcurrentConnections: e.target.value,
+                    }))
+                  }
+                  placeholder="Из тарифа"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Override: upload Mbps</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={vpnLimitsForm.vpnSpeedLimitUpMbps}
+                  onChange={(e) =>
+                    setVpnLimitsForm((prev) => ({
+                      ...prev,
+                      vpnSpeedLimitUpMbps: e.target.value,
+                    }))
+                  }
+                  placeholder="Из тарифа"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Override: download Mbps</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={vpnLimitsForm.vpnSpeedLimitDownMbps}
+                  onChange={(e) =>
+                    setVpnLimitsForm((prev) => ({
+                      ...prev,
+                      vpnSpeedLimitDownMbps: e.target.value,
+                    }))
+                  }
+                  placeholder="Из тарифа"
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={handleSaveVpnLimits}
+              disabled={isSavingVpnLimits}
+              className="w-full sm:w-auto"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {isSavingVpnLimits ? "Сохранение..." : "Сохранить лимиты"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-3">
+            <p className="text-sm font-black text-muted-foreground uppercase tracking-widest">
+              Активные соединения
+            </p>
+            <h3 className="text-4xl font-black tabular-nums">
+              {data.vpn.totals.activeConnections}
+            </h3>
+            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-wider">
+              {data.vpn.totals.totalSessionCount} сессий всего
+            </p>
+          </div>
+
+          <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-3">
+            <p className="text-sm font-black text-muted-foreground uppercase tracking-widest">
+              Трафик VPN
+            </p>
+            <h3 className="text-4xl font-black tabular-nums">
+              {formatBytes(totalVpnBytes)}
+            </h3>
+            <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-wider text-muted-foreground/70">
+              <span className="flex items-center gap-1 text-emerald-500">
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                {formatBytes(data.vpn.totals.totalBytesUp)}
+              </span>
+              <span className="flex items-center gap-1 text-sky-500">
+                <ArrowDownRight className="w-3.5 h-3.5" />
+                {formatBytes(data.vpn.totals.totalBytesDown)}
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-3">
+            <p className="text-sm font-black text-muted-foreground uppercase tracking-widest">
+              Протоколы
+            </p>
+            <h3 className="text-4xl font-black tabular-nums">
+              {data.vpn.totals.protocolCount}
+            </h3>
+            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-wider">
+              Hysteria / VLESS и дальше
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-8">
+          <div className="bg-card border border-border/60 rounded-[2.5rem] p-8 space-y-6">
+            <div>
+              <h3 className="text-lg font-black tracking-tight">
+                Распределение по протоколам
+              </h3>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">
+                Доля от общего VPN-трафика
+              </p>
+            </div>
+
+            {data.vpn.protocols.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-border/70 px-6 py-10 text-center text-sm italic text-muted-foreground">
+                VPN-статистика пока нет
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {data.vpn.protocols.map((protocol) => {
+                  const share =
+                    totalVpnBytes > 0
+                      ? Math.round((protocol.totalBytes / totalVpnBytes) * 100)
+                      : 0;
+
+                  return (
+                    <div
+                      key={protocol.id}
+                      className="rounded-[2rem] border border-border/50 px-6 py-5 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-base font-black uppercase tracking-wide">
+                            {protocol.protocol}
+                          </p>
+                          <p className="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest mt-1">
+                            {protocol.activeConnections} active • {protocol.sessionCount} sessions
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-black tabular-nums">
+                            {share}%
+                          </p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+                            share
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${Math.max(share, share > 0 ? 6 : 0)}%` }}
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-bold uppercase tracking-wider text-muted-foreground/70">
+                        <span className="flex items-center gap-1 text-emerald-500">
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                          {formatBytes(protocol.totalBytesUp)}
+                        </span>
+                        <span className="flex items-center gap-1 text-sky-500">
+                          <ArrowDownRight className="w-3.5 h-3.5" />
+                          {formatBytes(protocol.totalBytesDown)}
+                        </span>
+                        <span>{formatBytes(protocol.totalBytes)} total</span>
+                        {protocol.lastSeenAt && (
+                          <span>
+                            last{" "}
+                            {new Date(protocol.lastSeenAt).toLocaleDateString(
+                              "ru-RU",
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-card border border-border/60 rounded-[2.5rem] p-8 space-y-6">
+            <div>
+              <h3 className="text-lg font-black tracking-tight">
+                Последние VPN-сессии
+              </h3>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">
+                Hysteria live sessions + persisted history
+              </p>
+            </div>
+
+            {data.vpn.recentSessions.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-border/70 px-6 py-10 text-center text-sm italic text-muted-foreground">
+                За выбранный период VPN-сессий нет
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {data.vpn.recentSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="rounded-[2rem] border border-border/50 px-5 py-4 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black uppercase tracking-wide">
+                          {session.protocol}
+                        </p>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60 mt-1">
+                          {session.deviceName ?? "Unknown device"}
+                          {session.deviceOs ? ` • ${session.deviceOs}` : ""}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider ${
+                          session.status === "active"
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {session.status}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 text-xs font-bold uppercase tracking-wider text-muted-foreground/70">
+                      <span>{formatBytes(session.bytesUp + session.bytesDown)}</span>
+                      <span className="text-emerald-500">
+                        up {formatBytes(session.bytesUp)}
+                      </span>
+                      <span className="text-sky-500">
+                        down {formatBytes(session.bytesDown)}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      {session.connectedAt
+                        ? new Date(session.connectedAt).toLocaleString("ru-RU")
+                        : "No connectedAt"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ─── Domain statistics ─────────────────────────────────────── */}
+        <DomainStats domains={data.domainStats ?? []} />
       </div>
 
       <div className="space-y-6">

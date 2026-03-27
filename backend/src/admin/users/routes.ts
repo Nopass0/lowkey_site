@@ -6,6 +6,10 @@
 import Elysia, { t } from "elysia";
 import { db } from "../../db";
 import { adminMiddleware } from "../../auth/middleware";
+import { resolveVpnPolicyForUser } from "../../vpn/policy";
+
+const ACTIVE_VPN_SESSION_STALE_MS = 5 * 60 * 1000;
+const ACTIVE_DOMAIN_WINDOW_MS = 2 * 60 * 1000;
 
 function parseOptionalBooleanFilter(value?: string) {
   if (value === "true") return true;
@@ -43,10 +47,6 @@ function serializeAdminUser(user: {
   };
 }
 
-/**
- * Admin users routes group.
- * Provides user listing, ban toggle, and subscription management.
- */
 export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
   .use(adminMiddleware)
   .get(
@@ -75,9 +75,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           ...(typeof hideAiMenu === "boolean" ? { hideAiMenu } : {}),
           ...(typeof hasSubscription === "boolean"
             ? {
-                subscription: hasSubscription
-                  ? { isNot: null }
-                  : { is: null },
+                subscription: hasSubscription ? { isNot: null } : { is: null },
               }
             : {}),
           ...(plan ? { subscription: { is: { planId: plan } } } : {}),
@@ -104,7 +102,8 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           pageSize,
           totalPages: Math.ceil(total / pageSize),
         };
-      } catch (err) {
+      } catch (error) {
+        console.error("[AdminUsersList] error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }
@@ -135,7 +134,8 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         });
 
         return serializeAdminUser(updated);
-      } catch (err) {
+      } catch (error) {
+        console.error("[AdminUserBan] error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }
@@ -159,7 +159,8 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         });
 
         return serializeAdminUser(updated);
-      } catch (err) {
+      } catch (error) {
+        console.error("[AdminUserPreferences] error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }
@@ -227,7 +228,8 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         }
 
         return serializeAdminUser(updated);
-      } catch (err) {
+      } catch (error) {
+        console.error("[AdminUserSubscription] error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }
@@ -257,7 +259,8 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
         });
 
         return serializeAdminUser(updated);
-      } catch (err) {
+      } catch (error) {
+        console.error("[AdminUserBalance] error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }
@@ -267,6 +270,53 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
       body: t.Object({
         balance: t.Number(),
         referralBalance: t.Number(),
+      }),
+    },
+  )
+  .patch(
+    "/:id/vpn-limits",
+    async ({ params, body, set }) => {
+      try {
+        const updated = await db.user.update({
+          where: { id: params.id },
+          data: {
+            vpnMaxDevices: body.vpnMaxDevices ?? null,
+            vpnMaxConcurrentConnections:
+              body.vpnMaxConcurrentConnections ?? null,
+            vpnSpeedLimitUpMbps: body.vpnSpeedLimitUpMbps ?? null,
+            vpnSpeedLimitDownMbps: body.vpnSpeedLimitDownMbps ?? null,
+          },
+          include: { subscription: true },
+        });
+
+        return {
+          success: true,
+          vpnPolicy: await resolveVpnPolicyForUser(updated.id, {
+            planId: updated.subscription?.planId ?? null,
+            userOverrides: {
+              vpnMaxDevices: updated.vpnMaxDevices,
+              vpnMaxConcurrentConnections:
+                updated.vpnMaxConcurrentConnections,
+              vpnSpeedLimitUpMbps: updated.vpnSpeedLimitUpMbps,
+              vpnSpeedLimitDownMbps: updated.vpnSpeedLimitDownMbps,
+            },
+          }),
+        };
+      } catch (error) {
+        console.error("[AdminUserVpnLimits] error:", error);
+        set.status = 500;
+        return { message: "Internal server error" };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      body: t.Object({
+        vpnMaxDevices: t.Optional(t.Union([t.Number(), t.Null()])),
+        vpnMaxConcurrentConnections: t.Optional(
+          t.Union([t.Number(), t.Null()]),
+        ),
+        vpnSpeedLimitUpMbps: t.Optional(t.Union([t.Number(), t.Null()])),
+        vpnSpeedLimitDownMbps: t.Optional(t.Union([t.Number(), t.Null()])),
       }),
     },
   )
@@ -293,50 +343,146 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
           return { message: "User not found" };
         }
 
-        const referrals = await db.user.findMany({
-          where: {
-            referredById: userId,
-            joinedAt: { gte: startDate, lte: endDate },
-          },
-          select: { joinedAt: true },
-        });
+        const activeSessionCutoff = new Date(
+          Date.now() - ACTIVE_VPN_SESSION_STALE_MS,
+        );
+        const activeDomainCutoff = new Date(Date.now() - ACTIVE_DOMAIN_WINDOW_MS);
 
-        const transactions = await db.transaction.findMany({
-          where: {
-            userId,
-            createdAt: { gte: startDate, lte: endDate },
-          },
-          orderBy: { createdAt: "desc" },
-        });
+        const [
+          referrals,
+          transactions,
+          vpnProtocolDocs,
+          vpnSessionDocs,
+          activeSessionDocs,
+          domainDocs,
+        ] =
+          await Promise.all([
+            db.user.findMany({
+              where: {
+                referredById: userId,
+                joinedAt: { gte: startDate, lte: endDate },
+              },
+              select: { joinedAt: true },
+            }),
+            db.transaction.findMany({
+              where: {
+                userId,
+                createdAt: { gte: startDate, lte: endDate },
+              },
+              orderBy: { createdAt: "desc" },
+            }),
+            db.vpnUserProtocolStat.findMany({
+              where: { userId },
+              orderBy: { totalBytesDown: "desc" },
+            }),
+            db.vpnSession.findMany({
+              where: {
+                userId,
+                connectedAt: {
+                  gte: startDate,
+                  lte: endDate,
+                },
+              },
+              orderBy: { connectedAt: "desc" },
+              take: 15,
+            }),
+            db.vpnSession.findMany({
+              where: {
+                userId,
+                status: "active",
+                lastSeenAt: { gte: activeSessionCutoff },
+              },
+              orderBy: { lastSeenAt: "desc" },
+              take: 100,
+            }),
+            db.vpnDomainStats.findMany({
+              where: { userId },
+              orderBy: { visitCount: "desc" },
+              take: 50,
+            }),
+          ]);
 
         const dailyStats: Record<
           string,
           { referrals: number; referralEarnings: number; topups: number }
         > = {};
 
-        const curr = new Date(startDate);
-        while (curr <= endDate) {
-          const day = curr.toISOString().split("T")[0];
+        const cursor = new Date(startDate);
+        while (cursor <= endDate) {
+          const day = cursor.toISOString().split("T")[0];
           dailyStats[day] = { referrals: 0, referralEarnings: 0, topups: 0 };
-          curr.setDate(curr.getDate() + 1);
+          cursor.setDate(cursor.getDate() + 1);
         }
 
-        referrals.forEach((r) => {
-          const day = r.joinedAt.toISOString().split("T")[0];
-          if (dailyStats[day]) dailyStats[day].referrals++;
+        referrals.forEach((referral) => {
+          const day = referral.joinedAt.toISOString().split("T")[0];
+          if (dailyStats[day]) {
+            dailyStats[day].referrals += 1;
+          }
         });
 
         transactions.forEach((transaction) => {
           const day = transaction.createdAt.toISOString().split("T")[0];
-          if (dailyStats[day]) {
-            if (transaction.type === "referral_earning") {
-              dailyStats[day].referralEarnings += transaction.amount;
-            }
-            if (transaction.type === "topup") {
-              dailyStats[day].topups += transaction.amount;
-            }
+          if (!dailyStats[day]) {
+            return;
+          }
+
+          if (transaction.type === "referral_earning") {
+            dailyStats[day].referralEarnings += transaction.amount;
+          }
+          if (transaction.type === "topup") {
+            dailyStats[day].topups += transaction.amount;
           }
         });
+
+        const vpnPolicy = await resolveVpnPolicyForUser(user.id, {
+          planId: user.subscription?.planId ?? null,
+          userOverrides: {
+            vpnMaxDevices: user.vpnMaxDevices,
+            vpnMaxConcurrentConnections: user.vpnMaxConcurrentConnections,
+            vpnSpeedLimitUpMbps: user.vpnSpeedLimitUpMbps,
+            vpnSpeedLimitDownMbps: user.vpnSpeedLimitDownMbps,
+          },
+        });
+
+        const activeDeviceCount = new Set(
+          activeSessionDocs
+            .map((session) => {
+              if (session.deviceId) {
+                return `device:${session.deviceId}`;
+              }
+              if (session.remoteAddr) {
+                return `remote:${session.remoteAddr}`;
+              }
+              if (session.deviceName) {
+                return `name:${session.deviceName}`;
+              }
+              return null;
+            })
+            .filter((value): value is string => Boolean(value)),
+        ).size;
+
+        const mappedDomainStats = domainDocs.map((doc) => ({
+          domain: String(doc.domain ?? ""),
+          visitCount: Number(doc.visitCount ?? 0),
+          bytesTransferred: Number(doc.bytesTransferred ?? 0),
+          lastVisitAt: doc.lastVisitAt
+            ? new Date(doc.lastVisitAt).toISOString()
+            : null,
+        }));
+
+        const activeDomains = mappedDomainStats
+          .filter((doc) => {
+            if (!doc.lastVisitAt) {
+              return false;
+            }
+            return new Date(doc.lastVisitAt) >= activeDomainCutoff;
+          })
+          .sort((a, b) => {
+            const left = a.lastVisitAt ? new Date(a.lastVisitAt).getTime() : 0;
+            const right = b.lastVisitAt ? new Date(b.lastVisitAt).getTime() : 0;
+            return right - left;
+          });
 
         return {
           user: {
@@ -351,6 +497,71 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
             joinedAt: user.joinedAt.toISOString(),
             referralCount: user._count.referrals,
             deviceCount: user._count.devices,
+            vpnPolicy,
+          },
+          vpn: {
+            totals: {
+              protocolCount: vpnProtocolDocs.length,
+              totalSessionCount: vpnProtocolDocs.reduce(
+                (acc, doc) => acc + Number(doc.sessionCount ?? 0),
+                0,
+              ),
+              activeDeviceCount,
+              activeConnections: vpnProtocolDocs.reduce(
+                (acc, doc) => acc + Number(doc.activeConnections ?? 0),
+                0,
+              ),
+              totalBytesUp: vpnProtocolDocs.reduce(
+                (acc, doc) => acc + Number(doc.totalBytesUp ?? 0),
+                0,
+              ),
+              totalBytesDown: vpnProtocolDocs.reduce(
+                (acc, doc) => acc + Number(doc.totalBytesDown ?? 0),
+                0,
+              ),
+            },
+            protocols: vpnProtocolDocs
+              .map((doc) => ({
+                id: String(doc.id),
+                protocol: String(doc.protocol ?? "unknown"),
+                sessionCount: Number(doc.sessionCount ?? 0),
+                activeConnections: Number(doc.activeConnections ?? 0),
+                totalBytesUp: Number(doc.totalBytesUp ?? 0),
+                totalBytesDown: Number(doc.totalBytesDown ?? 0),
+                totalBytes:
+                  Number(doc.totalBytesUp ?? 0) +
+                  Number(doc.totalBytesDown ?? 0),
+                lastSeenAt: doc.lastSeenAt
+                  ? new Date(doc.lastSeenAt).toISOString()
+                  : null,
+                lastDeviceId: doc.lastDeviceId ? String(doc.lastDeviceId) : null,
+                lastServerId: doc.lastServerId ? String(doc.lastServerId) : null,
+              }))
+              .sort((a, b) => b.totalBytes - a.totalBytes),
+            recentSessions: vpnSessionDocs.map((doc) => ({
+              id: String(doc.id),
+              protocol: String(doc.protocol ?? "unknown"),
+              status: String(doc.status ?? "unknown"),
+              connectedAt: doc.connectedAt
+                ? new Date(doc.connectedAt).toISOString()
+                : null,
+              disconnectedAt: doc.disconnectedAt
+                ? new Date(doc.disconnectedAt).toISOString()
+                : null,
+              lastSeenAt: doc.lastSeenAt
+                ? new Date(doc.lastSeenAt).toISOString()
+                : null,
+              bytesUp: Number(doc.bytesUp ?? 0),
+              bytesDown: Number(doc.bytesDown ?? 0),
+              deviceId: doc.deviceId ? String(doc.deviceId) : null,
+              deviceName: doc.deviceName ? String(doc.deviceName) : null,
+              deviceOs: doc.deviceOs ? String(doc.deviceOs) : null,
+              clientVersion: doc.clientVersion
+                ? String(doc.clientVersion)
+                : null,
+              remoteAddr: doc.remoteAddr ? String(doc.remoteAddr) : null,
+              serverId: doc.serverId ? String(doc.serverId) : null,
+            })),
           },
           dailyStats: Object.entries(dailyStats)
             .map(([date, stats]) => ({
@@ -365,9 +576,11 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
             title: transaction.title,
             createdAt: transaction.createdAt.toISOString(),
           })),
+          domainStats: mappedDomainStats,
+          activeDomains,
         };
-      } catch (err) {
-        console.error("[AdminUserStats] Error:", err);
+      } catch (error) {
+        console.error("[AdminUserStats] Error:", error);
         set.status = 500;
         return { message: "Internal server error" };
       }

@@ -22,11 +22,24 @@ interface AdminPlan extends SubscriptionPlan {
   isActive: boolean;
   sortOrder: number;
   prices: Record<string, number>;
+  maxDevices: number;
+  maxConcurrentConnections: number;
+  speedLimitUpMbps: number | null;
+  speedLimitDownMbps: number | null;
   promoActive: boolean;
   promoPrice: number | null;
   promoLabel: string | null;
   promoMaxUses: number | null;
   promoUsed: number;
+}
+
+interface AdminPlanPriceDto {
+  period: string;
+  price: number;
+}
+
+interface AdminPlanDto extends Omit<AdminPlan, "prices"> {
+  prices?: AdminPlanPriceDto[];
 }
 
 export default function TariffsAdminPage() {
@@ -47,10 +60,10 @@ export default function TariffsAdminPage() {
   const fetchPlans = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await apiClient.get<any[]>("/admin/tariffs");
-      const transformed = res.map((plan) => ({
+      const res = await apiClient.get<AdminPlanDto[]>("/admin/tariffs");
+      const transformed: AdminPlan[] = res.map((plan) => ({
         ...plan,
-        prices: (plan.prices || []).reduce((acc: Record<string, number>, p: any) => {
+        prices: (plan.prices || []).reduce((acc: Record<string, number>, p) => {
           acc[p.period] = p.price;
           return acc;
         }, {}),
@@ -59,9 +72,13 @@ export default function TariffsAdminPage() {
         promoLabel: plan.promoLabel ?? null,
         promoMaxUses: plan.promoMaxUses ?? null,
         promoUsed: plan.promoUsed ?? 0,
-      })) as AdminPlan[];
+        maxDevices: plan.maxDevices ?? 1,
+        maxConcurrentConnections: plan.maxConcurrentConnections ?? 1,
+        speedLimitUpMbps: plan.speedLimitUpMbps ?? null,
+        speedLimitDownMbps: plan.speedLimitDownMbps ?? null,
+      }));
       setPlans(transformed);
-    } catch (err) {
+    } catch {
       toast.error("Ошибка при загрузке тарифов");
     } finally {
       setIsLoading(false);
@@ -167,6 +184,10 @@ export default function TariffsAdminPage() {
       slug: "", name: "", features: [], isPopular: false, isActive: true,
       sortOrder: plans.length + 1,
       prices: { monthly: 0, "3months": 0, "6months": 0, yearly: 0 },
+      maxDevices: 1,
+      maxConcurrentConnections: 1,
+      speedLimitUpMbps: null,
+      speedLimitDownMbps: null,
       promoActive: false, promoPrice: null, promoLabel: null, promoMaxUses: null,
     });
     setIsDialogOpen(true);
@@ -183,6 +204,10 @@ export default function TariffsAdminPage() {
       await apiClient.post("/admin/tariffs", {
         ...editingPlan,
         prices: pricesArray,
+        maxDevices: editingPlan.maxDevices ?? 1,
+        maxConcurrentConnections: editingPlan.maxConcurrentConnections ?? 1,
+        speedLimitUpMbps: editingPlan.speedLimitUpMbps ?? null,
+        speedLimitDownMbps: editingPlan.speedLimitDownMbps ?? null,
         promoActive: editingPlan.promoActive ?? false,
         promoPrice: editingPlan.promoActive ? (editingPlan.promoPrice ?? null) : null,
         promoLabel: editingPlan.promoLabel ?? null,
@@ -382,6 +407,19 @@ export default function TariffsAdminPage() {
                     </div>
                   ))}
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="rounded-full">
+                    {plan.maxDevices} устр.
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {plan.maxConcurrentConnections} одновр.
+                  </Badge>
+                  {(plan.speedLimitUpMbps || plan.speedLimitDownMbps) && (
+                    <Badge variant="outline" className="rounded-full">
+                      {plan.speedLimitUpMbps ?? "∞"}↑ / {plan.speedLimitDownMbps ?? "∞"}↓ Мбит
+                    </Badge>
+                  )}
+                </div>
                 <ul className="grid grid-cols-1 gap-1.5">
                   {plan.features.map((f, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -418,7 +456,7 @@ export default function TariffsAdminPage() {
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Slug</Label>
                     <Input value={editingPlan.slug} onChange={(e) => setEditingPlan((p) => ({ ...p, slug: e.target.value }))}
-                      placeholder="pro" disabled={!!plans.find((p) => p.id === (editingPlan as any).id)}
+                      placeholder="pro" disabled={!!plans.find((p) => p.id === editingPlan.id)}
                       className="h-11 bg-muted/20 rounded-xl" />
                   </div>
                   <div className="space-y-2">
@@ -450,6 +488,96 @@ export default function TariffsAdminPage() {
                         <Input type="number" value={editingPlan.prices?.[period] ?? 0} onChange={(e) => updatePrice(period, e.target.value)} className="h-10 shadow-none" />
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-muted/30 border border-border/50 space-y-4">
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground border-b border-border/50 pb-3">
+                    VPN лимиты
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Базовые ограничения тарифа для устройств, одновременных подключений и скорости.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-muted-foreground/70">
+                      Макс. устройств
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={editingPlan.maxDevices ?? 1}
+                      onChange={(e) =>
+                        setEditingPlan((p) => ({
+                          ...p,
+                          maxDevices: Math.max(1, parseInt(e.target.value, 10) || 1),
+                        }))
+                      }
+                      className="h-10 shadow-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-muted-foreground/70">
+                      Макс. одноврем. подключений
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={editingPlan.maxConcurrentConnections ?? 1}
+                      onChange={(e) =>
+                        setEditingPlan((p) => ({
+                          ...p,
+                          maxConcurrentConnections: Math.max(
+                            1,
+                            parseInt(e.target.value, 10) || 1,
+                          ),
+                        }))
+                      }
+                      className="h-10 shadow-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-muted-foreground/70">
+                      Upload (Мбит/с)
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={editingPlan.speedLimitUpMbps ?? ""}
+                      onChange={(e) =>
+                        setEditingPlan((p) => ({
+                          ...p,
+                          speedLimitUpMbps: e.target.value
+                            ? Math.max(1, parseInt(e.target.value, 10) || 1)
+                            : null,
+                        }))
+                      }
+                      placeholder="Пусто = без лимита"
+                      className="h-10 shadow-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold text-muted-foreground/70">
+                      Download (Мбит/с)
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={editingPlan.speedLimitDownMbps ?? ""}
+                      onChange={(e) =>
+                        setEditingPlan((p) => ({
+                          ...p,
+                          speedLimitDownMbps: e.target.value
+                            ? Math.max(1, parseInt(e.target.value, 10) || 1)
+                            : null,
+                        }))
+                      }
+                      placeholder="Пусто = без лимита"
+                      className="h-10 shadow-none"
+                    />
                   </div>
                 </div>
               </div>

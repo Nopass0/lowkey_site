@@ -110,6 +110,70 @@ function startSubscriptionRenewalWorker(): void {
   console.log("[RenewalWorker] Started.");
 }
 
+function startVpnSessionCleanupWorker(): void {
+  const INTERVAL_MS = 60 * 1000;
+  const STALE_MS = 5 * 60 * 1000;
+
+  const tick = async () => {
+    try {
+      const cutoff = new Date(Date.now() - STALE_MS);
+      const staleSessions = await db.vpnSession.findMany({
+        where: {
+          status: "active",
+          lastSeenAt: { lt: cutoff },
+        },
+        take: 200,
+      });
+
+      for (const session of staleSessions) {
+        await db.vpnSession.update({
+          where: { id: session.id },
+          data: {
+            status: "disconnected",
+            disconnectedAt: new Date(),
+            lastSeenAt: new Date(),
+          },
+        });
+
+        const stats = await db.vpnUserProtocolStat.findFirst({
+          where: {
+            userId: session.userId,
+            protocol: session.protocol,
+          },
+        });
+
+        if (stats) {
+          await db.vpnUserProtocolStat.update({
+            where: { id: stats.id },
+            data: {
+              activeConnections: Math.max(
+                0,
+                Number(stats.activeConnections ?? 0) - 1,
+              ),
+              lastSeenAt: new Date(),
+            },
+          });
+        }
+      }
+
+      if (staleSessions.length > 0) {
+        console.log(
+          `[VpnCleanup] Marked ${staleSessions.length} stale VPN session(s) disconnected.`,
+        );
+      }
+    } catch (error) {
+      console.error("[VpnCleanup] Error:", error);
+    }
+  };
+
+  void tick();
+  setInterval(() => {
+    void tick();
+  }, INTERVAL_MS);
+
+  console.log("[VpnCleanup] Started.");
+}
+
 /**
  * Main Elysia application instance.
  * Configured with CORS, Swagger docs, error handling, and all route modules.
@@ -120,7 +184,7 @@ const app = new Elysia()
     cors({
       origin: true, // Allow all origins in dev
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Server-Secret"],
       credentials: true,
     }),
   )
@@ -227,5 +291,6 @@ console.log(`📚 Swagger docs at http://localhost:${config.PORT}/swagger`);
 startServerMonitor();
 startMailingWorker();
 startSubscriptionRenewalWorker();
+startVpnSessionCleanupWorker();
 
 export type App = typeof app;

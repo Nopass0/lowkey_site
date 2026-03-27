@@ -173,6 +173,10 @@ export interface SubscriptionPlan {
   name: string;
   prices: Record<string, number>; // period -> price in RUB
   features: string[];
+  maxDevices?: number;
+  maxConcurrentConnections?: number;
+  speedLimitUpMbps?: number | null;
+  speedLimitDownMbps?: number | null;
   isPopular?: boolean;
   promoActive?: boolean;
   promoPrice?: number | null;
@@ -758,10 +762,86 @@ export interface AdminUserDailyStats {
   topups: number;
 }
 
+export interface AdminUserVpnProtocolStat {
+  id: string;
+  protocol: string;
+  sessionCount: number;
+  activeConnections: number;
+  totalBytesUp: number;
+  totalBytesDown: number;
+  totalBytes: number;
+  lastSeenAt: string | null;
+  lastDeviceId: string | null;
+  lastServerId: string | null;
+}
+
+export interface AdminUserVpnSession {
+  id: string;
+  protocol: string;
+  status: string;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
+  lastSeenAt: string | null;
+  bytesUp: number;
+  bytesDown: number;
+  deviceId: string | null;
+  deviceName: string | null;
+  deviceOs: string | null;
+  clientVersion: string | null;
+  remoteAddr: string | null;
+  serverId: string | null;
+}
+
+export interface AdminUserVpnStats {
+  totals: {
+    protocolCount: number;
+    totalSessionCount: number;
+    activeDeviceCount: number;
+    activeConnections: number;
+    totalBytesUp: number;
+    totalBytesDown: number;
+  };
+  protocols: AdminUserVpnProtocolStat[];
+  recentSessions: AdminUserVpnSession[];
+}
+
+export interface AdminUserDomainStat {
+  domain: string;
+  visitCount: number;
+  bytesTransferred: number;
+  lastVisitAt: string | null;
+}
+
 export interface AdminUserStatsResponse {
-  user: AdminUser & { referralCount: number };
+  user: AdminUser & {
+    referralCount: number;
+    vpnPolicy: {
+      planId: string | null;
+      planDefaults: {
+        maxDevices: number;
+        maxConcurrentConnections: number;
+        speedLimitUpMbps: number | null;
+        speedLimitDownMbps: number | null;
+      };
+      userOverrides: {
+        maxDevices: number | null;
+        maxConcurrentConnections: number | null;
+        speedLimitUpMbps: number | null;
+        speedLimitDownMbps: number | null;
+      };
+      effective: {
+        maxDevices: number;
+        maxConcurrentConnections: number;
+        speedLimitUpMbps: number | null;
+        speedLimitDownMbps: number | null;
+      };
+    };
+  };
+  vpn: AdminUserVpnStats;
   dailyStats: AdminUserDailyStats[];
   transactions: Transaction[];
+  domainStats: AdminUserDomainStat[];
+  activeDomains: AdminUserDomainStat[];
 }
 
 export interface AdminMailingRecipient {

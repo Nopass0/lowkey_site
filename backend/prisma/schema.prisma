@@ -31,6 +31,10 @@ model User {
   referralRate              Float             @default(0.2)
   aiPurchasedTokens         Int               @default(0)
   aiFreeTokensUsed          Int               @default(0)
+  vpnMaxDevices             Int?
+  vpnMaxConcurrentConnections Int?
+  vpnSpeedLimitUpMbps       Int?
+  vpnSpeedLimitDownMbps     Int?
   devices                   Device[]
   aiConversations           AiConversation[]
   aiFiles                   AiFile[]
@@ -83,6 +87,10 @@ model SubscriptionPlan {
   slug            String              @unique
   name            String
   features        String[]
+  maxDevices      Int                 @default(1)
+  maxConcurrentConnections Int        @default(1)
+  speedLimitUpMbps Int?
+  speedLimitDownMbps Int?
   isPopular       Boolean             @default(false)
   isActive        Boolean             @default(true)
   sortOrder       Int                 @default(0)
