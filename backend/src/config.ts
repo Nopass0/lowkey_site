@@ -5,6 +5,18 @@
 
 /** Application configuration object */
 export const config = {
+  /** VoidDB base URL used by the backend and provisioned VPN nodes */
+  VOIDDB_URL: process.env.VOIDDB_URL ?? "https://db.lowkey.su",
+
+  /** VoidDB username used when provisioned VPN nodes connect directly */
+  VOIDDB_USERNAME: process.env.VOIDDB_USERNAME ?? "",
+
+  /** VoidDB password used when provisioned VPN nodes connect directly */
+  VOIDDB_PASSWORD: process.env.VOIDDB_PASSWORD ?? "",
+
+  /** VoidDB token used when provisioned VPN nodes connect directly */
+  VOIDDB_TOKEN: process.env.VOIDDB_TOKEN ?? "",
+
   /** Legacy PostgreSQL connection string used only by import tooling */
   LEGACY_DATABASE_URL:
     process.env.LEGACY_DATABASE_URL ??
@@ -48,6 +60,17 @@ export const config = {
 
   /** Optional hostname suffix restriction for auto-issued VPN node TLS */
   VPN_TLS_ALLOWED_SUFFIX: process.env.VPN_TLS_ALLOWED_SUFFIX ?? ".lowkey.su",
+
+  /** Git repository cloned by remote VPN node bootstrap */
+  VPN_NODE_REPO_URL:
+    process.env.VPN_NODE_REPO_URL ??
+    "https://github.com/Nopass0/lowkey_site.git",
+
+  /** Base directory used on remote VPN nodes for the cloned repo */
+  VPN_NODE_BASE_DIR: process.env.VPN_NODE_BASE_DIR ?? "/opt/lowkey_site",
+
+  /** PM2 process name prefix used for remote VPN node deployment */
+  VPN_NODE_PM2_PREFIX: process.env.VPN_NODE_PM2_PREFIX ?? "hysteria",
 
   /** JWT token expiry for regular users */
   JWT_EXPIRY: process.env.JWT_EXPIRY ?? "30d",

@@ -354,8 +354,14 @@ database {
     id String @id @map("_id")
     ip String
     hostname String?
+    sshUsername String?
+    sshPasswordEncrypted String?
     port Int
     status String @default("offline")
+    deployStatus String @default("not_deployed")
+    deployMessage String?
+    deployedAt DateTime?
+    pm2ProcessName String?
     currentLoad Int @default(0)
     lastSeenAt DateTime @default(now())
     createdAt DateTime @default(now())

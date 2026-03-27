@@ -46,13 +46,18 @@ type TokenInfo struct {
 // ─── In-memory session ────────────────────────────────────────────────────────
 
 type session struct {
-	id        string
-	userID    string
-	protocol  string
-	serverID  string
-	serverIP  string
-	bytesUp   atomic.Int64
-	bytesDown atomic.Int64
+	id                string
+	userID            string
+	deviceID          string
+	deviceName        string
+	deviceOS          string
+	protocol          string
+	serverID          string
+	serverIP          string
+	remoteAddr        string
+	bytesUp           atomic.Int64
+	bytesDown         atomic.Int64
+	lastTrafficReport atomic.Int64
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -65,6 +70,9 @@ type Server struct {
 
 	activeSessions sync.Map // sessionID -> *session
 	activeCount    atomic.Int64
+	sessionMu      sync.Mutex
+	sessionsByConn map[string][]*session
+	sessionsByUser map[string][]*session
 
 	httpClient *http.Client
 }
@@ -72,10 +80,12 @@ type Server struct {
 // New creates a new Server.
 func New(cfg *config.Config, db *voiddb.Client, tracker *stats.Tracker) *Server {
 	return &Server{
-		cfg:        cfg,
-		db:         db,
-		tracker:    tracker,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		cfg:            cfg,
+		db:             db,
+		tracker:        tracker,
+		sessionsByConn: make(map[string][]*session),
+		sessionsByUser: make(map[string][]*session),
+		httpClient:     &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -216,16 +226,26 @@ func (s *Server) validateTokenWithVoidDB(token string) TokenInfo {
 // ─── Session lifecycle ────────────────────────────────────────────────────────
 
 // OpenSession creates an in-memory session and reports it to the backend.
-func (s *Server) OpenSession(userID, protocol, remoteAddr string) *session {
+func (s *Server) OpenSession(userID, deviceID, protocol, remoteAddr string) *session {
+	deviceName, deviceOS := s.lookupDevice(deviceID)
 	sess := &session{
-		id:       uuid.New().String(),
-		userID:   userID,
-		protocol: protocol,
-		serverID: s.cfg.ServerID,
-		serverIP: s.cfg.ServerIP,
+		id:         uuid.New().String(),
+		userID:     userID,
+		deviceID:   deviceID,
+		deviceName: deviceName,
+		deviceOS:   deviceOS,
+		protocol:   protocol,
+		serverID:   s.cfg.ServerID,
+		serverIP:   s.cfg.ServerIP,
+		remoteAddr: remoteAddr,
 	}
 	s.activeSessions.Store(sess.id, sess)
 	s.activeCount.Add(1)
+	s.sessionMu.Lock()
+	connKey := sessionConnKey(userID, remoteAddr)
+	s.sessionsByConn[connKey] = append(s.sessionsByConn[connKey], sess)
+	s.sessionsByUser[userID] = append(s.sessionsByUser[userID], sess)
+	s.sessionMu.Unlock()
 	go s.reportEvent("connect", sess, remoteAddr, 0, 0)
 	return sess
 }
@@ -234,6 +254,19 @@ func (s *Server) OpenSession(userID, protocol, remoteAddr string) *session {
 func (s *Server) CloseSession(sess *session) {
 	s.activeSessions.Delete(sess.id)
 	s.activeCount.Add(-1)
+	s.sessionMu.Lock()
+	s.sessionsByConn[sessionConnKey(sess.userID, sess.remoteAddr)] = removeSessionByID(
+		s.sessionsByConn[sessionConnKey(sess.userID, sess.remoteAddr)],
+		sess.id,
+	)
+	if len(s.sessionsByConn[sessionConnKey(sess.userID, sess.remoteAddr)]) == 0 {
+		delete(s.sessionsByConn, sessionConnKey(sess.userID, sess.remoteAddr))
+	}
+	s.sessionsByUser[sess.userID] = removeSessionByID(s.sessionsByUser[sess.userID], sess.id)
+	if len(s.sessionsByUser[sess.userID]) == 0 {
+		delete(s.sessionsByUser, sess.userID)
+	}
+	s.sessionMu.Unlock()
 	go s.reportEvent("disconnect", sess, "", sess.bytesUp.Load(), sess.bytesDown.Load())
 }
 
@@ -252,6 +285,15 @@ func (s *Server) reportEvent(event string, sess *session, remoteAddr string, up,
 		"protocol":  sess.protocol,
 		"bytesUp":   float64(up),
 		"bytesDown": float64(down),
+	}
+	if sess.deviceID != "" {
+		payload["deviceId"] = sess.deviceID
+	}
+	if sess.deviceName != "" {
+		payload["deviceName"] = sess.deviceName
+	}
+	if sess.deviceOS != "" {
+		payload["deviceOs"] = sess.deviceOS
 	}
 	if remoteAddr != "" {
 		payload["remoteAddr"] = remoteAddr
@@ -533,4 +575,22 @@ func stripPort(hostport string) string {
 		return hostport[:idx]
 	}
 	return hostport
+}
+
+func (s *Server) lookupDevice(deviceID string) (string, string) {
+	if deviceID == "" {
+		return "", ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	doc, err := s.db.DB("lowkey").Collection("devices").Get(ctx, deviceID)
+	if err != nil || doc == nil {
+		return "", ""
+	}
+
+	deviceName, _ := doc["name"].(string)
+	deviceOS, _ := doc["os"].(string)
+	return deviceName, deviceOS
 }

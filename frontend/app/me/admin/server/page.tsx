@@ -1,19 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
+import type { Dispatch, SetStateAction } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  Server,
-  Activity,
-  Power,
-  PowerOff,
-  ShieldCheck,
   Edit,
-  Trash2,
+  Globe,
+  KeyRound,
+  Loader2,
   MapPin,
-  Link,
-  ChevronRight,
+  PlusCircle,
   RefreshCw,
+  Server,
+  Trash2,
+  Wrench,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/api/client";
@@ -31,10 +30,10 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,54 +44,456 @@ interface VpnServer {
   id: string;
   ip: string;
   hostname?: string | null;
+  sshUsername?: string | null;
+  hasSshPassword: boolean;
   port: number;
   supportedProtocols: string[];
   serverType: string;
   currentLoad: number;
   status: string;
+  deployStatus: string;
+  deployMessage: string | null;
+  deployedAt: string | null;
+  pm2ProcessName: string | null;
   location: string;
   connectLinkTemplate: string | null;
-  lastSeenAt?: string;
+  lastSeenAt: string | null;
+  createdAt: string | null;
+}
+
+interface ServerFormState {
+  ip: string;
+  hostname: string;
+  location: string;
+  sshUsername: string;
+  sshPassword: string;
+  pm2ProcessName: string;
+  connectLinkTemplate: string;
+}
+
+const EMPTY_SERVER_FORM: ServerFormState = {
+  ip: "",
+  hostname: "",
+  location: "",
+  sshUsername: "",
+  sshPassword: "",
+  pm2ProcessName: "",
+  connectLinkTemplate: "",
+};
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Не удалось выполнить запрос";
+}
+
+function createFormFromServer(server: VpnServer): ServerFormState {
+  return {
+    ip: server.ip,
+    hostname: server.hostname ?? "",
+    location: server.location ?? "",
+    sshUsername: server.sshUsername ?? "",
+    sshPassword: "",
+    pm2ProcessName: server.pm2ProcessName ?? "",
+    connectLinkTemplate: server.connectLinkTemplate ?? "",
+  };
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleString("ru-RU");
+}
+
+function renderStatusBadge(status: string) {
+  if (status === "online") {
+    return (
+      <Badge className="border-green-500/20 bg-green-500/10 text-green-600">
+        online
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="outline" className="border-border/60">
+      {status}
+    </Badge>
+  );
+}
+
+function renderDeployBadge(status: string) {
+  if (status === "deployed") {
+    return (
+      <Badge className="border-emerald-500/20 bg-emerald-500/10 text-emerald-600">
+        deployed
+      </Badge>
+    );
+  }
+
+  if (status === "deploying") {
+    return (
+      <Badge className="border-amber-500/20 bg-amber-500/10 text-amber-600">
+        deploying
+      </Badge>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <Badge className="border-destructive/20 bg-destructive/10 text-destructive">
+        failed
+      </Badge>
+    );
+  }
+
+  return <Badge variant="outline">{status}</Badge>;
+}
+
+function ServerFormFields({
+  form,
+  setForm,
+  passwordRequired,
+}: {
+  form: ServerFormState;
+  setForm: Dispatch<SetStateAction<ServerFormState>>;
+  passwordRequired: boolean;
+}) {
+  const updateField = (field: keyof ServerFormState, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Публичный IP</Label>
+          <Input
+            value={form.ip}
+            onChange={(event) => updateField("ip", event.target.value)}
+            placeholder="203.0.113.10"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Hostname</Label>
+          <Input
+            value={form.hostname}
+            onChange={(event) => updateField("hostname", event.target.value)}
+            placeholder="s1.lowkey.su"
+          />
+          <p className="text-xs text-muted-foreground">
+            Домен должен уже смотреть на этот сервер, иначе certbot не выпустит
+            сертификат.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Локация</Label>
+          <Input
+            value={form.location}
+            onChange={(event) => updateField("location", event.target.value)}
+            placeholder="Frankfurt, Germany"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>PM2 process name</Label>
+          <Input
+            value={form.pm2ProcessName}
+            onChange={(event) => updateField("pm2ProcessName", event.target.value)}
+            placeholder="hysteria-s1"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>SSH username</Label>
+          <Input
+            value={form.sshUsername}
+            onChange={(event) => updateField("sshUsername", event.target.value)}
+            placeholder="root"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>
+            SSH password
+            {passwordRequired ? "" : " (оставьте пустым, чтобы не менять)"}
+          </Label>
+          <Input
+            type="password"
+            value={form.sshPassword}
+            onChange={(event) => updateField("sshPassword", event.target.value)}
+            placeholder={passwordRequired ? "Введите пароль" : "Новый пароль"}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Шаблон ссылки подключения</Label>
+        <Textarea
+          value={form.connectLinkTemplate}
+          onChange={(event) =>
+            updateField("connectLinkTemplate", event.target.value)
+          }
+          placeholder="vless://{uuid}@{host}:443?encryption=none&security=tls&sni={host}"
+          className="min-h-[140px] font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground">
+          Поддерживаются переменные: <code>{"{uuid}"}</code>, <code>{"{ip}"}</code>,{" "}
+          <code>{"{host}"}</code>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CreateServerDialog({
+  open,
+  onOpenChange,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  onCreate: (form: ServerFormState) => Promise<void>;
+}) {
+  const [form, setForm] = useState<ServerFormState>(EMPTY_SERVER_FORM);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setForm(EMPTY_SERVER_FORM);
+      setIsSaving(false);
+    }
+  }, [open]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onCreate(form);
+      onOpenChange(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>Новый VPN-сервер</DialogTitle>
+          <DialogDescription>
+            Сохраните IP, SSH-доступ и hostname. После этого сервер можно сразу
+            развернуть из панели через SSH и pm2.
+          </DialogDescription>
+        </DialogHeader>
+
+        <ServerFormFields
+          form={form}
+          setForm={setForm}
+          passwordRequired={true}
+        />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Сохраняю...
+              </>
+            ) : (
+              "Сохранить"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditServerDialog({
+  server,
+  onUpdate,
+}: {
+  server: VpnServer;
+  onUpdate: (id: string, form: ServerFormState) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<ServerFormState>(createFormFromServer(server));
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setForm(createFormFromServer(server));
+  }, [server, open]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onUpdate(server.id, form);
+      setOpen(false);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8 rounded-lg"
+        onClick={() => setOpen(true)}
+      >
+        <Edit className="h-4 w-4" />
+      </Button>
+      <DialogContent className="sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>Редактирование сервера</DialogTitle>
+          <DialogDescription>
+            Можно изменить SSH-доступ, hostname, шаблон ссылки и PM2 process
+            name.
+          </DialogDescription>
+        </DialogHeader>
+
+        <ServerFormFields
+          form={form}
+          setForm={setForm}
+          passwordRequired={false}
+        />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Отмена
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Сохраняю...
+              </>
+            ) : (
+              "Сохранить"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function AdminServersPage() {
   const { user } = useAuth();
   const [servers, setServers] = useState<VpnServer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deployingIds, setDeployingIds] = useState<string[]>([]);
+
+  const fetchServers = useCallback(
+    async (showSpinner = false) => {
+      if (showSpinner) {
+        setRefreshing(true);
+      }
+
+      try {
+        const data = await apiClient.get<VpnServer[]>("/admin/server/list");
+        setServers(data);
+      } catch (error) {
+        console.error("Failed to fetch servers", error);
+        toast.error(getErrorMessage(error));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (user?.isAdmin) {
-      fetchServers();
+      void fetchServers();
     }
-  }, [user]);
+  }, [fetchServers, user]);
 
-  const fetchServers = async () => {
-    try {
-      const data = await apiClient.get<VpnServer[]>("/admin/server/list");
-      setServers(data);
-    } catch (error) {
-      console.error("Failed to fetch servers", error);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (!servers.some((server) => server.deployStatus === "deploying")) {
+      return;
     }
+
+    const interval = window.setInterval(() => {
+      void fetchServers();
+    }, 5_000);
+
+    return () => window.clearInterval(interval);
+  }, [fetchServers, servers]);
+
+  const handleCreate = async (form: ServerFormState) => {
+    await apiClient.post("/admin/server", {
+      ip: form.ip,
+      hostname: form.hostname,
+      location: form.location,
+      sshUsername: form.sshUsername,
+      sshPassword: form.sshPassword,
+      pm2ProcessName: form.pm2ProcessName || undefined,
+      connectLinkTemplate: form.connectLinkTemplate || null,
+    });
+    toast.success("Сервер добавлен");
+    await fetchServers();
   };
 
-  const handleUpdate = async (id: string, data: Partial<VpnServer>) => {
-    try {
-      await apiClient.patch(`/admin/server/${id}`, data);
-      await fetchServers();
-    } catch (error) {
-      console.error("Failed to update server", error);
-    }
+  const handleUpdate = async (id: string, form: ServerFormState) => {
+    await apiClient.patch(`/admin/server/${id}`, {
+      ip: form.ip,
+      hostname: form.hostname || null,
+      location: form.location,
+      sshUsername: form.sshUsername || null,
+      sshPassword: form.sshPassword,
+      pm2ProcessName: form.pm2ProcessName || null,
+      connectLinkTemplate: form.connectLinkTemplate || null,
+    });
+    toast.success("Сервер обновлён");
+    await fetchServers();
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Вы уверены, что хотите удалить этот сервер?")) return;
+    if (!confirm("Удалить этот сервер из панели?")) {
+      return;
+    }
+
     try {
       await apiClient.delete(`/admin/server/${id}`);
+      toast.success("Сервер удалён");
       await fetchServers();
     } catch (error) {
       console.error("Failed to delete server", error);
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleDeploy = async (id: string) => {
+    try {
+      setDeployingIds((prev) => [...prev, id]);
+      await apiClient.post(`/admin/server/${id}/deploy`);
+      toast.success("Развёртывание запущено");
+      await fetchServers();
+    } catch (error) {
+      console.error("Failed to start deployment", error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      setDeployingIds((prev) => prev.filter((item) => item !== id));
     }
   };
 
@@ -105,36 +506,47 @@ export default function AdminServersPage() {
   }
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto w-full">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2 flex items-center gap-3">
-            <Server className="w-8 h-8 text-primary" />
-            VPN Серверы
+          <h1 className="mb-2 flex items-center gap-3 text-3xl font-bold tracking-tight">
+            <Server className="h-8 w-8 text-primary" />
+            VPN-серверы
           </h1>
-          <p className="text-muted-foreground">
-            Управление доступными VPN серверами, мониторинг нагрузки и
-            протоколов.
+          <p className="max-w-3xl text-muted-foreground">
+            Добавляйте ноды по IP и SSH-доступу, потом разворачивайте на них
+            `site/hysteria-server` прямо из админки. На удалённой машине скрипт
+            сам подтянет репозиторий, поставит Go, certbot, pm2 и поднимет
+            сервис.
           </p>
         </div>
-        <Button
-          onClick={fetchServers}
-          variant="outline"
-          className="rounded-xl gap-2 cursor-pointer"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          Обновить
-        </Button>
+
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => void fetchServers(true)}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Обновить
+          </Button>
+          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+            <PlusCircle className="h-4 w-4" />
+            Добавить сервер
+          </Button>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="overflow-hidden rounded-2xl border bg-card">
         <Table>
-          <TableHeader className="bg-muted/50">
+          <TableHeader className="bg-muted/40">
             <TableRow>
-              <TableHead className="w-[100px]">Статус</TableHead>
-              <TableHead>Локация / IP</TableHead>
-              <TableHead>Протоколы</TableHead>
-              <TableHead>Нагрузка</TableHead>
+              <TableHead className="w-[130px]">Статус</TableHead>
+              <TableHead>Сервер</TableHead>
+              <TableHead>SSH / PM2</TableHead>
+              <TableHead>Деплой</TableHead>
               <TableHead className="text-right">Действия</TableHead>
             </TableRow>
           </TableHeader>
@@ -143,221 +555,145 @@ export default function AdminServersPage() {
               <TableRow>
                 <TableCell
                   colSpan={5}
-                  className="h-32 text-center text-muted-foreground"
+                  className="h-36 text-center text-muted-foreground"
                 >
-                  Серверы не найдены
+                  Серверы ещё не добавлены
                 </TableCell>
               </TableRow>
             ) : (
-              servers.map((server) => (
-                <TableRow key={server.id} className="group">
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          server.status === "online"
-                            ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)] animate-pulse"
-                            : "bg-red-500"
-                        }`}
-                      />
-                      <span className="font-medium capitalize">
-                        {server.status}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col">
-                      <div className="font-bold text-foreground flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
-                        {server.location || "Неизвестно"}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5 font-mono">
-                        {server.hostname ? `${server.hostname} (${server.ip})` : server.ip}:{server.port}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {server.supportedProtocols?.map((proto) => (
-                        <Badge
-                          key={proto}
-                          variant="secondary"
-                          className="text-[10px] uppercase font-black tracking-wider px-1.5 py-0"
-                        >
-                          {proto}
+              servers.map((server) => {
+                const isDeploying =
+                  server.deployStatus === "deploying" ||
+                  deployingIds.includes(server.id);
+
+                return (
+                  <TableRow key={server.id} className="align-top">
+                    <TableCell>
+                      <div className="flex flex-col gap-2">
+                        {renderStatusBadge(server.status)}
+                        <Badge variant="outline">
+                          load: {server.currentLoad}
                         </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2 bg-muted/50 w-fit px-2 py-1 rounded-lg border border-border/50">
-                      <Activity className="w-3.5 h-3.5 text-primary" />
-                      <span className="font-bold text-sm">
-                        {server.currentLoad}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <EditServerDialog
-                        server={server}
-                        onUpdate={(data) => handleUpdate(server.id, data)}
-                      />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg cursor-pointer"
-                        onClick={() => handleDelete(server.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <MapPin className="h-4 w-4 text-muted-foreground" />
+                          {server.location || "Unknown, UN"}
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Globe className="h-4 w-4" />
+                          <span className="font-mono">
+                            {server.hostname
+                              ? `${server.hostname} (${server.ip}:${server.port})`
+                              : `${server.ip}:${server.port}`}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {server.supportedProtocols.map((protocol) => (
+                            <Badge key={protocol} variant="secondary">
+                              {protocol}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Последний heartbeat: {formatDateTime(server.lastSeenAt)}
+                        </div>
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex flex-col gap-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <KeyRound className="h-4 w-4 text-muted-foreground" />
+                          <span>{server.sshUsername || "—"}</span>
+                        </div>
+                        <div className="text-muted-foreground">
+                          Пароль: {server.hasSshPassword ? "сохранён" : "не задан"}
+                        </div>
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Wrench className="h-4 w-4" />
+                          <span className="font-mono">
+                            {server.pm2ProcessName || "авто"}
+                          </span>
+                        </div>
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex max-w-[320px] flex-col gap-2">
+                        {renderDeployBadge(server.deployStatus)}
+                        <div className="text-xs text-muted-foreground">
+                          Последний деплой: {formatDateTime(server.deployedAt)}
+                        </div>
+                        {server.deployMessage ? (
+                          <div className="rounded-xl border bg-muted/40 p-3 text-xs text-muted-foreground">
+                            <div className="line-clamp-4 whitespace-pre-wrap break-words font-mono">
+                              {server.deployMessage}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          className="gap-2"
+                          onClick={() => void handleDeploy(server.id)}
+                          disabled={isDeploying}
+                        >
+                          {isDeploying ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Deploying
+                            </>
+                          ) : (
+                            <>
+                              <Wrench className="h-4 w-4" />
+                              Deploy
+                            </>
+                          )}
+                        </Button>
+
+                        <EditServerDialog
+                          server={server}
+                          onUpdate={handleUpdate}
+                        />
+
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => void handleDelete(server.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
       </div>
+
+      <CreateServerDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreate={async (form) => {
+          try {
+            await handleCreate(form);
+          } catch (error) {
+            toast.error(getErrorMessage(error));
+            throw error;
+          }
+        }}
+      />
     </div>
-  );
-}
-
-function EditServerDialog({
-  server,
-  onUpdate,
-}: {
-  server: VpnServer;
-  onUpdate: (data: Partial<VpnServer>) => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [location, setLocation] = useState(server.location);
-  const [hostname, setHostname] = useState(server.hostname || "");
-  const [template, setTemplate] = useState(server.connectLinkTemplate || "");
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      await onUpdate({ location, hostname: hostname || null, connectLinkTemplate: template || null });
-      toast.success("Сервер обновлен");
-      setOpen(false);
-    } catch {
-      toast.error("Ошибка обновления");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg cursor-pointer"
-        >
-          <Edit className="w-4 h-4" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[900px] w-[95vw] max-h-[95vh] overflow-y-auto p-0 border-none bg-transparent shadow-none">
-        <div className="bg-card border border-border/50 rounded-[2rem] shadow-2xl overflow-hidden">
-          <div className="p-8 md:p-12">
-            <DialogHeader className="mb-8">
-              <DialogTitle className="text-3xl font-black tracking-tight flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-primary/10 text-primary">
-                  <Server className="w-6 h-6" />
-                </div>
-                Редактирование сервера
-              </DialogTitle>
-            </DialogHeader>
-
-            <div className="grid grid-cols-1 gap-8 py-4">
-              <div className="space-y-3">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground/60 ml-1">
-                  Локация (будет видна пользователю)
-                </Label>
-                <div className="relative group">
-                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground transition-colors group-focus-within:text-primary" />
-                  <Input
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Frankfurt, Germany"
-                    className="rounded-2xl h-14 pl-12 bg-muted/30 border-border/50 focus:bg-background transition-all text-lg font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground/60 ml-1">
-                  Hostname / домен сервера
-                </Label>
-                <div className="relative group">
-                  <Link className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground transition-colors group-focus-within:text-primary" />
-                  <Input
-                    value={hostname}
-                    onChange={(e) => setHostname(e.target.value)}
-                    placeholder="s1.lowkey.su"
-                    className="rounded-2xl h-14 pl-12 bg-muted/30 border-border/50 focus:bg-background transition-all text-lg font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground/60 ml-1">
-                  Шаблон ссылки подключения (vless://...)
-                </Label>
-                <div className="relative group">
-                  <Link className="absolute left-4 top-5 w-5 h-5 text-muted-foreground transition-colors group-focus-within:text-primary" />
-                  <Textarea
-                    value={template}
-                    onChange={(e) => setTemplate(e.target.value)}
-                    placeholder="vless://{uuid}@{host}:443?..."
-                    className="rounded-[1.5rem] min-h-[160px] pl-12 pt-4 bg-muted/30 border-border/50 focus:bg-background transition-all font-mono text-sm leading-relaxed resize-none"
-                  />
-                </div>
-                <div className="flex items-center gap-4 px-2">
-                  <p className="text-[11px] font-bold text-muted-foreground/50 uppercase tracking-wider">
-                    Доступные переменные:
-                  </p>
-                  <div className="flex gap-2">
-                    <code className="px-2 py-0.5 rounded-md bg-primary/5 text-primary text-[10px] font-black border border-primary/10">
-                      {`{uuid}`}
-                    </code>
-                    <code className="px-2 py-0.5 rounded-md bg-primary/5 text-primary text-[10px] font-black border border-primary/10">
-                      {`{ip}`}
-                    </code>
-                    <code className="px-2 py-0.5 rounded-md bg-primary/5 text-primary text-[10px] font-black border border-primary/10">
-                      {`{host}`}
-                    </code>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="mt-10 gap-3">
-              <Button
-                variant="ghost"
-                onClick={() => setOpen(false)}
-                className="rounded-2xl px-8 h-12 font-bold hover:bg-muted transition-colors cursor-pointer"
-              >
-                Отмена
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="rounded-2xl px-10 h-12 font-black shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all cursor-pointer bg-primary text-primary-foreground"
-              >
-                {isSaving ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Сохранить"
-                )}
-              </Button>
-            </DialogFooter>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }

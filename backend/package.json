@@ -17,11 +17,12 @@
   "dependencies": {
     "@elysiajs/cors": "^1.3.1",
     "@elysiajs/swagger": "^1.3.1",
-    "@voiddb/orm": "^1.2.3",
     "@vercel/blob": "^1.1.1",
+    "@voiddb/orm": "^1.2.3",
     "bcryptjs": "^3.0.2",
     "elysia": "^1.3.1",
     "jose": "^6.0.11",
+    "ssh2": "^1.17.0",
     "tochka-sbp": "^1.0.0"
   },
   "devDependencies": {
