@@ -18,6 +18,7 @@ type Config struct {
 	// Central backend API (used for some operations)
 	BackendURL    string `yaml:"backend_url"`
 	BackendSecret string `yaml:"backend_secret"`
+	TLSCacheDir   string `yaml:"tls_cache_dir"`
 
 	// Hysteria2 server settings
 	Listen        string `yaml:"listen"` // e.g. "0.0.0.0:443"
@@ -68,6 +69,7 @@ func Load() *Config {
 	applyStringEnv("VOIDDB_TOKEN", &cfg.VoidDBToken)
 	applyStringEnv("BACKEND_URL", &cfg.BackendURL)
 	applyStringEnv("BACKEND_SECRET", &cfg.BackendSecret)
+	applyStringEnv("TLS_CACHE_DIR", &cfg.TLSCacheDir)
 	applyStringEnv("SERVER_ID", &cfg.ServerID)
 	applyStringEnv("SERVER_IP", &cfg.ServerIP)
 	applyStringEnv("SERVER_HOSTNAME", &cfg.ServerHostname)
@@ -95,6 +97,9 @@ func Load() *Config {
 	// Defaults
 	if cfg.BackendURL == "" {
 		cfg.BackendURL = "https://lowkey.su/api"
+	}
+	if cfg.TLSCacheDir == "" {
+		cfg.TLSCacheDir = "./tls-cache"
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "0.0.0.0:443"

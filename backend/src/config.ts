@@ -24,6 +24,21 @@ export const config = {
   /** Shared secret used by VPN nodes for /servers/* write endpoints */
   BACKEND_SECRET: process.env.BACKEND_SECRET ?? "",
 
+  /** PEM certificate body served to VPN nodes when auto-provisioning TLS */
+  VPN_TLS_CERT_PEM: process.env.VPN_TLS_CERT_PEM ?? "",
+
+  /** PEM private key body served to VPN nodes when auto-provisioning TLS */
+  VPN_TLS_KEY_PEM: process.env.VPN_TLS_KEY_PEM ?? "",
+
+  /** Filesystem path to the wildcard/fullchain certificate used for VPN node TLS */
+  VPN_TLS_CERT_FILE: process.env.VPN_TLS_CERT_FILE ?? "",
+
+  /** Filesystem path to the private key used for VPN node TLS */
+  VPN_TLS_KEY_FILE: process.env.VPN_TLS_KEY_FILE ?? "",
+
+  /** Optional hostname suffix restriction for auto-issued VPN node TLS */
+  VPN_TLS_ALLOWED_SUFFIX: process.env.VPN_TLS_ALLOWED_SUFFIX ?? ".lowkey.su",
+
   /** JWT token expiry for regular users */
   JWT_EXPIRY: process.env.JWT_EXPIRY ?? "30d",
 

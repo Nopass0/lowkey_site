@@ -4,7 +4,8 @@
  */
 
 import Elysia, { t } from "elysia";
-import { randomUUID } from "crypto";
+import { X509Certificate, randomUUID } from "crypto";
+import { readFile } from "fs/promises";
 import { db } from "../db";
 import { authMiddleware } from "../auth/middleware";
 import { config } from "../config";
@@ -27,6 +28,63 @@ function requireServerSecret(
   }
 
   return true;
+}
+
+function requireTLSMaterialSecret(
+  headers: Record<string, string | undefined>,
+  set: { status?: number | string },
+) {
+  if (!config.BACKEND_SECRET) {
+    set.status = 503;
+    return false;
+  }
+
+  if (headers["x-server-secret"] !== config.BACKEND_SECRET) {
+    set.status = 401;
+    return false;
+  }
+
+  return true;
+}
+
+async function loadVpnTLSMaterial() {
+  if (config.VPN_TLS_CERT_PEM && config.VPN_TLS_KEY_PEM) {
+    return {
+      certPem: config.VPN_TLS_CERT_PEM,
+      keyPem: config.VPN_TLS_KEY_PEM,
+    };
+  }
+
+  if (config.VPN_TLS_CERT_FILE && config.VPN_TLS_KEY_FILE) {
+    const [certPem, keyPem] = await Promise.all([
+      readFile(config.VPN_TLS_CERT_FILE, "utf8"),
+      readFile(config.VPN_TLS_KEY_FILE, "utf8"),
+    ]);
+    return { certPem, keyPem };
+  }
+
+  return null;
+}
+
+function normalizeHostname(hostname: string) {
+  return hostname.trim().toLowerCase().replace(/\.$/, "");
+}
+
+function isAllowedTLSHostname(hostname: string) {
+  const normalized = normalizeHostname(hostname);
+  const suffix = config.VPN_TLS_ALLOWED_SUFFIX.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (!suffix) {
+    return true;
+  }
+  return normalized.endsWith(suffix);
+}
+
+function verifyHostnameAgainstCert(certPem: string, hostname: string) {
+  const cert = new X509Certificate(certPem);
+  return Boolean(cert.checkHost(normalizeHostname(hostname)));
 }
 
 export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
@@ -83,6 +141,55 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
         port: t.Number(),
         supportedProtocols: t.Array(t.String()),
         serverType: t.String(),
+      }),
+    },
+  )
+  .post(
+    "/tls-material",
+    async ({ body, headers, set }) => {
+      if (!requireTLSMaterialSecret(headers, set)) {
+        return {
+          message: config.BACKEND_SECRET
+            ? "Unauthorized"
+            : "BACKEND_SECRET is required for TLS material provisioning",
+        };
+      }
+
+      try {
+        const hostname = normalizeHostname(body.hostname);
+        if (!isAllowedTLSHostname(hostname)) {
+          set.status = 400;
+          return { message: "Hostname is not allowed for VPN TLS provisioning" };
+        }
+
+        const material = await loadVpnTLSMaterial();
+        if (!material) {
+          set.status = 503;
+          return { message: "VPN TLS material is not configured on backend" };
+        }
+
+        if (!verifyHostnameAgainstCert(material.certPem, hostname)) {
+          set.status = 409;
+          return { message: "Configured TLS certificate does not cover requested hostname" };
+        }
+
+        return {
+          hostname,
+          certPem: material.certPem,
+          keyPem: material.keyPem,
+          source:
+            config.VPN_TLS_CERT_PEM && config.VPN_TLS_KEY_PEM ? "env" : "file",
+        };
+      } catch (error) {
+        console.error("[ServerTLSMaterial] error:", error);
+        set.status = 500;
+        return { message: "Internal server error" };
+      }
+    },
+    {
+      body: t.Object({
+        hostname: t.String(),
+        serverId: t.Optional(t.String()),
       }),
     },
   )

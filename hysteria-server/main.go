@@ -15,7 +15,8 @@
 //	VOIDDB_URL=http://voiddb:7700 \
 //	VOIDDB_USERNAME=admin VOIDDB_PASSWORD=secret \
 //	BACKEND_URL=https://lowkey.su/api \
-//	SERVER_IP=1.2.3.4 CERT_FILE=/ssl/server.crt KEY_FILE=/ssl/server.key \
+//	SERVER_IP=1.2.3.4 SERVER_HOSTNAME=s1.lowkey.su \
+//	BACKEND_SECRET=your-server-secret \
 //	./hysteria-server
 package main
 
@@ -57,8 +58,8 @@ func main() {
 	if cfg.BackendURL == "" {
 		log.Fatal("[Config] BACKEND_URL is required")
 	}
-	if cfg.CertFile == "" || cfg.KeyFile == "" {
-		log.Fatal("[Config] CERT_FILE and KEY_FILE are required")
+	if err := server.EnsureTLSMaterial(cfg); err != nil {
+		log.Fatalf("[TLS] %v", err)
 	}
 	if cfg.ServerIP == "" {
 		log.Printf("[Config] SERVER_IP is empty; server registration and captive portal IP mapping will be incomplete")

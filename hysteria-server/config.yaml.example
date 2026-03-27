@@ -11,6 +11,7 @@ voiddb_password: "changeme"
 # Central backend API URL
 backend_url: "https://lowkey.su/api"
 backend_secret: "your-server-secret-here"  # X-Server-Secret header
+tls_cache_dir: "./tls-cache"
 
 # Server identity
 server_ip: "1.2.3.4"          # public IP of this server
@@ -19,8 +20,10 @@ server_hostname: "s1.lowkey.su"
 
 # Hysteria2 TLS
 listen: "0.0.0.0:443"
-cert_file: "/etc/ssl/certs/server.crt"
-key_file:  "/etc/ssl/private/server.key"
+# cert_file/key_file are optional. If omitted, the node fetches TLS material
+# for server_hostname from the backend and stores it in tls_cache_dir.
+# cert_file: "/etc/ssl/certs/server.crt"
+# key_file:  "/etc/ssl/private/server.key"
 # obfs: "your-obfs-password"  # optional Salamander obfuscation
 bandwidth_up:   1000  # Mbps
 bandwidth_down: 1000  # Mbps
