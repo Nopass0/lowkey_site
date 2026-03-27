@@ -248,8 +248,8 @@ function ServerFormFields({
           className="min-h-[140px] font-mono text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          Поддерживаются переменные: <code>{"{uuid}"}</code>, <code>{"{ip}"}</code>,{" "}
-          <code>{"{host}"}</code>.
+          Поддерживаются переменные: <code>{"{uuid}"}</code>,{" "}
+          <code>{"{ip}"}</code>, <code>{"{host}"}</code>.
         </p>
       </div>
     </div>
@@ -514,10 +514,9 @@ export default function AdminServersPage() {
             VPN-серверы
           </h1>
           <p className="max-w-3xl text-muted-foreground">
-            Добавляйте ноды по IP и SSH-доступу, потом разворачивайте на них
-            `site/hysteria-server` прямо из админки. На удалённой машине скрипт
-            сам подтянет репозиторий, поставит Go, certbot, pm2 и поднимет
-            сервис.
+            Добавляйте ноды по IP и SSH-доступу, после чего админка сама
+            подключится по SSH, склонирует `lowkey_hysteria`, выпустит
+            сертификат через certbot и поднимет сервис через pm2.
           </p>
         </div>
 

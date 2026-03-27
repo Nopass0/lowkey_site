@@ -64,10 +64,10 @@ export const config = {
   /** Git repository cloned by remote VPN node bootstrap */
   VPN_NODE_REPO_URL:
     process.env.VPN_NODE_REPO_URL ??
-    "https://github.com/Nopass0/lowkey_site.git",
+    "https://github.com/Nopass0/lowkey_hysteria.git",
 
   /** Base directory used on remote VPN nodes for the cloned repo */
-  VPN_NODE_BASE_DIR: process.env.VPN_NODE_BASE_DIR ?? "/opt/lowkey_site",
+  VPN_NODE_BASE_DIR: process.env.VPN_NODE_BASE_DIR ?? "/opt/lowkey_hysteria",
 
   /** PM2 process name prefix used for remote VPN node deployment */
   VPN_NODE_PM2_PREFIX: process.env.VPN_NODE_PM2_PREFIX ?? "hysteria",

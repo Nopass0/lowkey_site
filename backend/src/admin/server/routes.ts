@@ -9,6 +9,21 @@ const MAX_DEPLOY_MESSAGE_LENGTH = 8_000;
 
 type VpnServerRow = Awaited<ReturnType<typeof db.vpnServer.findUnique>>;
 
+function hasText(value?: string | null) {
+  return Boolean(value && value.trim());
+}
+
+function isMeaningfulLocation(value?: string | null) {
+  return hasText(value) && value !== "Unknown, UN";
+}
+
+function getDateValue(value?: Date | null) {
+  if (!value) {
+    return 0;
+  }
+  return new Date(value).getTime();
+}
+
 function normalizeOptionalString(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -50,6 +65,88 @@ function defaultPm2ProcessName(server: {
 }) {
   const suffix = sanitizePm2Name(server.hostname || server.ip || server.id || "node");
   return `${config.VPN_NODE_PM2_PREFIX}-${suffix || "node"}`;
+}
+
+function getServerScore(server: NonNullable<VpnServerRow>) {
+  let score = 0;
+  if (hasText(server.hostname)) score += 100;
+  if (hasText(server.sshUsername)) score += 80;
+  if (hasText(server.sshPasswordEncrypted)) score += 80;
+  if (hasText(server.pm2ProcessName)) score += 20;
+  if (hasText(server.connectLinkTemplate)) score += 20;
+  if (isMeaningfulLocation(server.location)) score += 10;
+  if (server.deployStatus === "deploying") score += 40;
+  if (server.deployStatus === "deployed") score += 30;
+  if (server.status === "online") score += 10;
+  return score;
+}
+
+function mergeServerRows(rows: NonNullable<VpnServerRow>[]) {
+  const ordered = [...rows].sort((left, right) => {
+    const scoreDiff = getServerScore(right) - getServerScore(left);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    const seenDiff = getDateValue(right.lastSeenAt) - getDateValue(left.lastSeenAt);
+    if (seenDiff !== 0) {
+      return seenDiff;
+    }
+
+    return getDateValue(right.createdAt) - getDateValue(left.createdAt);
+  });
+
+  const merged = { ...ordered[0] };
+
+  for (const candidate of ordered.slice(1)) {
+    if (!hasText(merged.hostname) && hasText(candidate.hostname)) {
+      merged.hostname = candidate.hostname;
+    }
+    if (!hasText(merged.sshUsername) && hasText(candidate.sshUsername)) {
+      merged.sshUsername = candidate.sshUsername;
+    }
+    if (
+      !hasText(merged.sshPasswordEncrypted) &&
+      hasText(candidate.sshPasswordEncrypted)
+    ) {
+      merged.sshPasswordEncrypted = candidate.sshPasswordEncrypted;
+    }
+    if (!hasText(merged.pm2ProcessName) && hasText(candidate.pm2ProcessName)) {
+      merged.pm2ProcessName = candidate.pm2ProcessName;
+    }
+    if (
+      !hasText(merged.connectLinkTemplate) &&
+      hasText(candidate.connectLinkTemplate)
+    ) {
+      merged.connectLinkTemplate = candidate.connectLinkTemplate;
+    }
+    if (!isMeaningfulLocation(merged.location) && isMeaningfulLocation(candidate.location)) {
+      merged.location = candidate.location;
+    }
+    if (
+      (!Array.isArray(merged.supportedProtocols) ||
+        merged.supportedProtocols.length === 0) &&
+      Array.isArray(candidate.supportedProtocols) &&
+      candidate.supportedProtocols.length > 0
+    ) {
+      merged.supportedProtocols = candidate.supportedProtocols;
+    }
+    if (merged.serverType !== "hysteria2" && hasText(candidate.serverType)) {
+      merged.serverType = candidate.serverType;
+    }
+    if (getDateValue(candidate.lastSeenAt) > getDateValue(merged.lastSeenAt)) {
+      merged.lastSeenAt = candidate.lastSeenAt;
+      merged.currentLoad = candidate.currentLoad;
+      merged.status = candidate.status;
+    }
+    if (getDateValue(candidate.deployedAt) > getDateValue(merged.deployedAt)) {
+      merged.deployedAt = candidate.deployedAt;
+      merged.deployStatus = candidate.deployStatus;
+      merged.deployMessage = candidate.deployMessage;
+    }
+  }
+
+  return merged;
 }
 
 function truncateDeployMessage(...parts: Array<string | null | undefined>) {
@@ -97,12 +194,49 @@ function serializeServer(server: NonNullable<VpnServerRow>) {
   };
 }
 
-async function getServerOrNull(id: string) {
-  return db.vpnServer.findUnique({ where: { id } });
+async function getServerOrNull(id: string, mergeDuplicates = false) {
+  const server = await db.vpnServer.findUnique({ where: { id } });
+  if (!server || !mergeDuplicates) {
+    return server;
+  }
+
+  const siblings = await db.vpnServer.findMany({
+    where: { ip: server.ip },
+  });
+  if (siblings.length <= 1) {
+    return server;
+  }
+
+  const merged = mergeServerRows(siblings as NonNullable<VpnServerRow>[]);
+  return { ...merged, id: server.id };
+}
+
+async function getMergedServerList() {
+  const servers = await db.vpnServer.findMany({
+    orderBy: [{ createdAt: "desc" }, { lastSeenAt: "desc" }],
+  });
+
+  const groups = new Map<string, NonNullable<VpnServerRow>[]>();
+  for (const server of servers as NonNullable<VpnServerRow>[]) {
+    const bucket = groups.get(server.ip);
+    if (bucket) {
+      bucket.push(server);
+    } else {
+      groups.set(server.ip, [server]);
+    }
+  }
+
+  return [...groups.values()]
+    .map((group) => mergeServerRows(group))
+    .sort(
+      (left, right) =>
+        getDateValue(right.lastSeenAt ?? right.createdAt) -
+        getDateValue(left.lastSeenAt ?? left.createdAt),
+    );
 }
 
 async function runServerDeployment(serverId: string) {
-  let currentServer = await getServerOrNull(serverId);
+  let currentServer = await getServerOrNull(serverId, true);
 
   try {
     if (!currentServer) {
@@ -144,7 +278,7 @@ async function runServerDeployment(serverId: string) {
     });
   } catch (error) {
     console.error("[AdminServerDeploy] error:", error);
-    currentServer = currentServer ?? (await getServerOrNull(serverId));
+    currentServer = currentServer ?? (await getServerOrNull(serverId, true));
     const pm2ProcessName = currentServer
       ? normalizeOptionalString(currentServer.pm2ProcessName) ??
         defaultPm2ProcessName(currentServer)
@@ -168,10 +302,7 @@ async function runServerDeployment(serverId: string) {
 export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
   .use(adminMiddleware)
   .get("/list", async () => {
-    const servers = await db.vpnServer.findMany({
-      orderBy: [{ createdAt: "desc" }, { lastSeenAt: "desc" }],
-    });
-
+    const servers = await getMergedServerList();
     return servers.map((server) => serializeServer(server));
   })
   .post(
@@ -204,8 +335,28 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
         });
 
         if (existing) {
-          set.status = 409;
-          return { message: "Server with this IP already exists" };
+          const updated = await db.vpnServer.update({
+            where: { id: existing.id },
+            data: {
+              hostname,
+              sshUsername,
+              sshPasswordEncrypted: encryptSecret(body.sshPassword.trim()),
+              location,
+              pm2ProcessName:
+                pm2ProcessName || defaultPm2ProcessName({ ip, hostname }),
+              connectLinkTemplate: normalizeConnectLinkTemplate(
+                body.connectLinkTemplate,
+              ),
+              serverType: existing.serverType || "hysteria2",
+              supportedProtocols:
+                Array.isArray(existing.supportedProtocols) &&
+                existing.supportedProtocols.length > 0
+                  ? existing.supportedProtocols
+                  : ["hysteria2"],
+            },
+          });
+
+          return serializeServer(updated);
         }
 
         const created = await db.vpnServer.create({
@@ -342,7 +493,7 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
   )
   .post("/:id/deploy", async ({ params, set }) => {
     try {
-      const server = await getServerOrNull(params.id);
+      const server = await getServerOrNull(params.id, true);
       if (!server) {
         set.status = 404;
         return { message: "Server not found" };
@@ -437,9 +588,22 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
   )
   .delete("/:id", async ({ params, set }) => {
     try {
-      await db.vpnServer.delete({
-        where: { id: params.id },
+      const server = await getServerOrNull(params.id, true);
+      if (!server) {
+        set.status = 404;
+        return { message: "Server not found" };
+      }
+
+      const siblings = await db.vpnServer.findMany({
+        where: { ip: server.ip },
       });
+
+      for (const sibling of siblings) {
+        await db.vpnServer.delete({
+          where: { id: sibling.id },
+        });
+      }
+
       return { success: true };
     } catch (error) {
       console.error("[AdminServerDelete] error:", error);

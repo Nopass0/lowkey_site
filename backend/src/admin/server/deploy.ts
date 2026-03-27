@@ -35,21 +35,14 @@ function buildEnvFile(server: DeployServerInput, mtproto: MtprotoSettings) {
 
   const env = new Map<string, string>([
     ["VOIDDB_URL", config.VOIDDB_URL],
+    ["JWT_SECRET", config.JWT_SECRET],
     ["BACKEND_URL", "https://lowkey.su/api"],
-    ["CAPTIVE_PORTAL_URL", "https://lowkey.su"],
-    ["BACKEND_SECRET", config.BACKEND_SECRET],
     ["SERVER_IP", server.ip],
     ["SERVER_HOSTNAME", server.hostname],
-    ["SERVER_ID", server.serverId ?? ""],
-    ["CAPTIVE_IP", server.ip],
-    ["LISTEN", "0.0.0.0:443"],
-    ["TLS_CACHE_DIR", "./tls-cache"],
-    ["CAPTIVE_PORTAL_LISTEN", "0.0.0.0:8080"],
-    ["DNS_LISTEN", "0.0.0.0:53"],
-    ["UPSTREAM_DNS", "8.8.8.8:53"],
-    ["BANDWIDTH_UP", "1000"],
-    ["BANDWIDTH_DOWN", "1000"],
-    ["MTPROTO_BOT", "@lowkeyvpnbot"],
+    ["LISTEN_ADDR", ":443"],
+    ["HTTP_ADDR", ":8080"],
+    ["XRAY_PORT", "443"],
+    ["PM2_APP_NAME", server.pm2ProcessName],
   ]);
 
   if (config.VOIDDB_TOKEN) {
@@ -67,26 +60,14 @@ function buildEnvFile(server: DeployServerInput, mtproto: MtprotoSettings) {
     env.set("KEY_FILE", `/etc/letsencrypt/live/${server.hostname}/privkey.pem`);
   }
 
-  if (mtproto.enabled && mtproto.secret) {
-    const mtprotoPort = String(mtproto.port ?? 443);
-    env.set("MTPROTO_ENABLED", "true");
-    env.set("MTPROTO_LISTEN", `0.0.0.0:${mtprotoPort}`);
-    env.set("MTPROTO_SECRET", mtproto.secret);
-    env.set(
-      "MTPROTO_BOT",
-      mtproto.botUsername || mtproto.channelUsername || "@lowkeyvpnbot",
-    );
-    env.set(
-      "MTPROTO_ADD_BOT",
-      mtproto.addChannelOnConnect ? "true" : "false",
-    );
-    env.set(
-      "CAPTIVE_HTTPS_LISTEN",
-      mtprotoPort === "8443" ? "0.0.0.0:9443" : "0.0.0.0:8443",
-    );
-  } else {
-    env.set("MTPROTO_ENABLED", "false");
-    env.set("CAPTIVE_HTTPS_LISTEN", "0.0.0.0:8443");
+  if (config.TOCHKA_API_KEY) {
+    env.set("TOCHKA_API_KEY", config.TOCHKA_API_KEY);
+  }
+  if (config.TOCHKA_MERCHANT_ID) {
+    env.set("TOCHKA_MERCHANT_ID", config.TOCHKA_MERCHANT_ID);
+  }
+  if (config.TOCHKA_ACCOUNT_ID) {
+    env.set("TOCHKA_ACCOUNT_ID", config.TOCHKA_ACCOUNT_ID);
   }
 
   return [...env.entries()]
@@ -124,7 +105,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 REPO_URL="$(printf '%s' '${repoUrl}' | base64 -d)"
 BASE_DIR="$(printf '%s' '${baseDir}' | base64 -d)"
-APP_DIR="$BASE_DIR/site/hysteria-server"
+APP_DIR="$BASE_DIR"
 PM2_NAME="${server.pm2ProcessName}"
 HOSTNAME_VALUE="${server.hostname}"
 LETSENCRYPT_EMAIL_VALUE="$(printf '%s' '${letsencryptEmail}' | base64 -d)"
@@ -177,12 +158,8 @@ ensure_go_toolchain() {
 }
 
 run_root apt-get update
-run_root apt-get install -y ca-certificates curl git certbot npm libcap2-bin tar
+run_root apt-get install -y ca-certificates curl git certbot npm libcap2-bin tar unzip iptables iproute2
 ensure_go_toolchain
-
-if ! command -v pm2 >/dev/null 2>&1; then
-  run_root npm install -g pm2
-fi
 
 run_root mkdir -p "$BASE_DIR"
 run_root chown -R "$(id -u):$(id -g)" "$BASE_DIR"
@@ -205,7 +182,6 @@ fi
 
 cd "$APP_DIR"
 go mod download
-go build -o hysteria-server .
 
 if [ -n "$LETSENCRYPT_EMAIL_VALUE" ] && [ -n "$HOSTNAME_VALUE" ]; then
   run_root certbot certonly --standalone \\
@@ -216,24 +192,9 @@ if [ -n "$LETSENCRYPT_EMAIL_VALUE" ] && [ -n "$HOSTNAME_VALUE" ]; then
     -d "$HOSTNAME_VALUE"
 fi
 
-printf '%s' '${envFile}' | base64 -d > .env.pm2
-
-cat > run-hysteria.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-set -a
-source ./.env.pm2
-set +a
-exec ./hysteria-server
-EOF
-
-chmod +x run-hysteria.sh
-run_root setcap 'cap_net_bind_service=+ep' ./hysteria-server || true
-
-pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
-pm2 start ./run-hysteria.sh --name "$PM2_NAME" --interpreter bash --cwd "$APP_DIR" --update-env
-pm2 save
-pm2 status "$PM2_NAME"
+printf '%s' '${envFile}' | base64 -d > .env
+run_root env PM2_APP_NAME="$PM2_NAME" bash ./scripts/pm2_start.sh
+run_root pm2 status "$PM2_NAME"
 `;
 }
 
