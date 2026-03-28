@@ -34,6 +34,12 @@ export function LandingFooter() {
               Документы и условия
             </h4>
             <Link
+              href="/telegram-proxy"
+              className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
+            >
+              Telegram MTProto Proxy
+            </Link>
+            <Link
               href="/legal/offer"
               className="text-sm text-muted-foreground transition-colors underline-offset-4 hover:text-primary hover:underline"
             >
