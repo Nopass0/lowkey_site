@@ -158,7 +158,7 @@ ensure_go_toolchain() {
 }
 
 run_root apt-get update
-run_root apt-get install -y ca-certificates curl git certbot npm libcap2-bin tar unzip iptables iproute2
+run_root apt-get install -y ca-certificates curl git certbot libcap2-bin tar unzip iptables iproute2
 ensure_go_toolchain
 
 run_root mkdir -p "$BASE_DIR"
@@ -184,6 +184,14 @@ cd "$APP_DIR"
 go mod download
 
 if [ -n "$LETSENCRYPT_EMAIL_VALUE" ] && [ -n "$HOSTNAME_VALUE" ]; then
+  if command -v ufw >/dev/null 2>&1; then
+    run_root ufw allow 80/tcp || true
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    run_root firewall-cmd --permanent --add-port=80/tcp || true
+    run_root firewall-cmd --reload || true
+  fi
+  run_root iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
   run_root certbot certonly --standalone \\
     --non-interactive \\
     --agree-tos \\
