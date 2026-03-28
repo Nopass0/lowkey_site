@@ -8,6 +8,17 @@ import { db } from "../db";
 import { authMiddleware } from "../auth/middleware";
 import crypto from "crypto";
 
+type TelegramProxyPlan = {
+  isTelegramPlan?: boolean | null;
+  telegramProxyEnabled?: boolean | null;
+} | null;
+
+type MtprotoSettings = {
+  enabled?: boolean | null;
+  port?: number | null;
+  secret?: string | null;
+} | null;
+
 /**
  * Generates a Gravatar-style avatar hash from a login string.
  *
@@ -56,6 +67,43 @@ function buildVlessLink(
   return link;
 }
 
+function planHasTelegramProxy(plan: TelegramProxyPlan): boolean {
+  return Boolean(plan?.isTelegramPlan || plan?.telegramProxyEnabled);
+}
+
+function buildMtprotoProxyLinks(
+  settings: MtprotoSettings,
+  serverIp: string,
+  serverHost?: string | null,
+) {
+  if (!settings?.enabled || !settings.secret) {
+    return null;
+  }
+
+  const host = (serverHost || serverIp).trim();
+  if (!host) {
+    return null;
+  }
+
+  const port =
+    typeof settings.port === "number" && Number.isFinite(settings.port)
+      ? Math.max(1, settings.port)
+      : 443;
+
+  const params = new URLSearchParams({
+    server: host,
+    port: String(port),
+    secret: settings.secret,
+  });
+
+  return {
+    mtprotoHost: host,
+    mtprotoPort: port,
+    mtprotoLink: `tg://proxy?${params.toString()}`,
+    mtprotoShareLink: `https://t.me/proxy?${params.toString()}`,
+  };
+}
+
 /**
  * User routes group.
  * Provides profile and transaction history endpoints.
@@ -91,12 +139,28 @@ export const userRoutes = new Elysia({ prefix: "/user" })
         (dbUser.subscription.isLifetime ||
           dbUser.subscription.activeUntil > new Date());
 
-      const vpnServer = isSubscriptionActive
-        ? await db.vpnServer.findFirst({
-            where: { status: "online" },
-            orderBy: [{ lastSeenAt: "desc" }, { currentLoad: "asc" }],
-          })
-        : null;
+      const [vpnServer, currentPlan, mtprotoSettings] =
+        isSubscriptionActive && dbUser.subscription
+          ? await Promise.all([
+              db.vpnServer.findFirst({
+                where: { status: "online" },
+                orderBy: [{ lastSeenAt: "desc" }, { currentLoad: "asc" }],
+              }),
+              db.subscriptionPlan.findFirst({
+                where: { slug: dbUser.subscription.planId },
+              }),
+              db.mtprotoSettings.findFirst({}),
+            ])
+          : [null, null, null];
+
+      const mtprotoAccess =
+        vpnServer && planHasTelegramProxy(currentPlan)
+          ? buildMtprotoProxyLinks(
+              mtprotoSettings,
+              vpnServer.ip,
+              vpnServer.hostname ?? null,
+            )
+          : null;
 
       let linkCode = dbUser.telegramLinkCode;
       if (!dbUser.telegramId) {
@@ -144,13 +208,24 @@ export const userRoutes = new Elysia({ prefix: "/user" })
               serverIp: vpnServer.ip,
               serverHost: vpnServer.hostname ?? null,
               location: vpnServer.location,
-              protocols: vpnServer.supportedProtocols,
+              protocols: mtprotoAccess
+                ? Array.from(
+                    new Set([
+                      ...vpnServer.supportedProtocols,
+                      "mtproto",
+                    ]),
+                  )
+                : vpnServer.supportedProtocols,
               vlessLink: buildVlessLink(
                 vpnServer.connectLinkTemplate,
                 dbUser.id,
                 vpnServer.ip,
                 vpnServer.hostname ?? null,
               ),
+              mtprotoLink: mtprotoAccess?.mtprotoLink ?? null,
+              mtprotoShareLink: mtprotoAccess?.mtprotoShareLink ?? null,
+              mtprotoHost: mtprotoAccess?.mtprotoHost ?? null,
+              mtprotoPort: mtprotoAccess?.mtprotoPort ?? null,
             }
           : null,
       };

@@ -22,6 +22,7 @@ interface AdminPlan extends SubscriptionPlan {
   isActive: boolean;
   sortOrder: number;
   prices: Record<string, number>;
+  telegramProxyEnabled: boolean;
   maxDevices: number;
   maxConcurrentConnections: number;
   speedLimitUpMbps: number | null;
@@ -73,6 +74,7 @@ export default function TariffsAdminPage() {
         promoMaxUses: plan.promoMaxUses ?? null,
         promoUsed: plan.promoUsed ?? 0,
         isTelegramPlan: plan.isTelegramPlan ?? false,
+        telegramProxyEnabled: plan.telegramProxyEnabled ?? false,
         maxDevices: plan.maxDevices ?? 1,
         maxConcurrentConnections: plan.maxConcurrentConnections ?? 1,
         speedLimitUpMbps: plan.speedLimitUpMbps ?? null,
@@ -190,6 +192,7 @@ export default function TariffsAdminPage() {
       speedLimitUpMbps: null,
       speedLimitDownMbps: null,
       isTelegramPlan: false,
+      telegramProxyEnabled: false,
       promoActive: false, promoPrice: null, promoLabel: null, promoMaxUses: null,
     });
     setIsDialogOpen(true);
@@ -211,6 +214,7 @@ export default function TariffsAdminPage() {
         speedLimitUpMbps: editingPlan.speedLimitUpMbps ?? null,
         speedLimitDownMbps: editingPlan.speedLimitDownMbps ?? null,
         isTelegramPlan: editingPlan.isTelegramPlan ?? false,
+        telegramProxyEnabled: editingPlan.telegramProxyEnabled ?? false,
         promoActive: editingPlan.promoActive ?? false,
         promoPrice: editingPlan.promoActive ? (editingPlan.promoPrice ?? null) : null,
         promoLabel: editingPlan.promoLabel ?? null,
@@ -379,6 +383,7 @@ export default function TariffsAdminPage() {
                     <CardTitle className="text-xl font-bold">{plan.name}</CardTitle>
                     {plan.isPopular && <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px] py-0 px-2">POPULAR</Badge>}
                     {plan.isTelegramPlan && <Badge className="bg-sky-500/10 text-sky-500 border-sky-500/20 text-[10px] py-0 px-2">TELEGRAM VPN</Badge>}
+                    {plan.telegramProxyEnabled && !plan.isTelegramPlan && <Badge className="bg-cyan-500/10 text-cyan-500 border-cyan-500/20 text-[10px] py-0 px-2">MTPROTO</Badge>}
                     {plan.promoActive && <Badge className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-[10px] py-0 px-2 gap-1"><Tag className="w-2.5 h-2.5" />АКЦИЯ</Badge>}
                   </div>
                   <CardDescription className="font-mono text-xs uppercase tracking-tighter opacity-70">ID: {plan.slug}</CardDescription>
@@ -493,6 +498,22 @@ export default function TariffsAdminPage() {
                 {editingPlan.isTelegramPlan && (
                   <p className="text-xs text-muted-foreground">
                     Если у этого тарифа нулевая цена, пользователь сможет оформить его без привязки карты.
+                  </p>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="telegramProxyEnabled"
+                    checked={editingPlan.telegramProxyEnabled ?? false}
+                    onCheckedChange={(v) => setEditingPlan((p) => ({ ...p, telegramProxyEnabled: v }))}
+                  />
+                  <Label htmlFor="telegramProxyEnabled" className="text-xs font-bold uppercase tracking-widest text-muted-foreground cursor-pointer">
+                    MTProto proxy access
+                  </Label>
+                </div>
+                {(editingPlan.isTelegramPlan || editingPlan.telegramProxyEnabled) && (
+                  <p className="text-xs text-muted-foreground">
+                    MTProto link will also be shown in the site account and in the Telegram bot.
                   </p>
                 )}
 

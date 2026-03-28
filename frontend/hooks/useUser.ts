@@ -47,9 +47,15 @@ const MOCK_PROFILE: UserProfile = {
     serverIp: "46.226.166.226",
     serverHost: "s1.lowkey.su",
     location: "RU",
-    protocols: ["VLESS"],
+    protocols: ["VLESS", "mtproto"],
     vlessLink:
       "vless://demo-user@46.226.166.226:443?type=tcp&security=tls#lowkey-demo",
+    mtprotoLink:
+      "tg://proxy?server=s1.lowkey.su&port=443&secret=dd00000000000000000000000000000000",
+    mtprotoShareLink:
+      "https://t.me/proxy?server=s1.lowkey.su&port=443&secret=dd00000000000000000000000000000000",
+    mtprotoHost: "s1.lowkey.su",
+    mtprotoPort: 443,
   } satisfies UserVpnAccess,
 };
 

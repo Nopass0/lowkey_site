@@ -88,7 +88,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const { devices } = useDevices();
   const { info: refInfo } = useReferralInfo();
-  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<"vless" | "mtproto" | null>(null);
 
   useEffect(() => {
     fetchPage(1, 5);
@@ -114,11 +114,16 @@ export default function DashboardPage() {
           (1000 * 60 * 60 * 24),
       )
     : 0;
-  const hasVpnAccess = Boolean(profile?.vpnAccess?.vlessLink);
-  const copyToClipboard = async (value: string) => {
+  const hasVpnAccess = Boolean(
+    profile?.vpnAccess?.vlessLink || profile?.vpnAccess?.mtprotoLink,
+  );
+  const copyToClipboard = async (value: string, key: "vless" | "mtproto") => {
     await navigator.clipboard.writeText(value);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    setCopiedKey(key);
+    window.setTimeout(
+      () => setCopiedKey((current) => (current === key ? null : current)),
+      1800,
+    );
   };
 
   return (
@@ -378,7 +383,8 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="bg-muted/40 border border-border/50 rounded-2xl p-4 space-y-3">
+            {profile.vpnAccess.vlessLink && (
+              <div className="bg-muted/40 border border-border/50 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-semibold">
@@ -392,9 +398,11 @@ export default function DashboardPage() {
                   type="button"
                   variant="outline"
                   className="cursor-pointer shadow-none"
-                  onClick={() => copyToClipboard(profile.vpnAccess!.vlessLink!)}
+                  onClick={() =>
+                    copyToClipboard(profile.vpnAccess!.vlessLink!, "vless")
+                  }
                 >
-                  {copied ? (
+                  {copiedKey === "vless" ? (
                     <>
                       <Check className="w-4 h-4 mr-2" />
                       Скопировано
@@ -410,7 +418,62 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-border/60 bg-background px-4 py-3 font-mono text-xs leading-6 break-all">
                 {profile.vpnAccess.vlessLink}
               </div>
-            </div>
+              </div>
+            )}
+
+            {profile.vpnAccess.mtprotoLink && (
+              <div className="bg-muted/40 border border-border/50 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-semibold">
+                      MTProto Proxy
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Copy this link or open it directly in Telegram.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="cursor-pointer shadow-none"
+                      onClick={() =>
+                        copyToClipboard(profile.vpnAccess!.mtprotoLink!, "mtproto")
+                      }
+                    >
+                      {copiedKey === "mtproto" ? (
+                        <>
+                          <Check className="w-4 h-4 mr-2" />
+                          РЎРєРѕРїРёСЂРѕРІР°РЅРѕ
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4 mr-2" />
+                          РљРѕРїРёСЂРѕРІР°С‚СЊ
+                        </>
+                      )}
+                    </Button>
+                    {profile.vpnAccess.mtprotoShareLink && (
+                      <Button
+                        asChild
+                        variant="outline"
+                        className="cursor-pointer shadow-none"
+                      >
+                        <Link
+                          href={profile.vpnAccess.mtprotoShareLink}
+                          target="_blank"
+                        >
+                          Open in Telegram
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-background px-4 py-3 font-mono text-xs leading-6 break-all">
+                  {profile.vpnAccess.mtprotoLink}
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-4 lg:grid-cols-3">
               {platformInstructions.map((platform) => (

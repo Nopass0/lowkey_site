@@ -94,6 +94,10 @@ export interface UserVpnAccess {
   location: string;
   protocols: string[];
   vlessLink: string | null;
+  mtprotoLink?: string | null;
+  mtprotoShareLink?: string | null;
+  mtprotoHost?: string | null;
+  mtprotoPort?: number | null;
 }
 
 export interface UserProfile {
@@ -180,6 +184,7 @@ export interface SubscriptionPlan {
   speedLimitDownMbps?: number | null;
   isPopular?: boolean;
   isTelegramPlan?: boolean;
+  telegramProxyEnabled?: boolean;
   promoActive?: boolean;
   promoPrice?: number | null;
   promoLabel?: string | null;
