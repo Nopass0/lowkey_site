@@ -818,6 +818,7 @@ export interface AdminUserDomainStat {
   lastRemoteAddr: string | null;
   lastServerId: string | null;
   lastServerIp: string | null;
+  sourceDomains: string[];
 }
 
 export interface AdminUserStatsResponse {

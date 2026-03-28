@@ -7,6 +7,7 @@ import Elysia, { t } from "elysia";
 import { db } from "../../db";
 import { adminMiddleware } from "../../auth/middleware";
 import { resolveVpnPolicyForUser } from "../../vpn/policy";
+import { buildAdminDomainStats } from "./domain-stats";
 
 const ACTIVE_VPN_SESSION_STALE_MS = 5 * 60 * 1000;
 const ACTIVE_DOMAIN_WINDOW_MS = 2 * 60 * 1000;
@@ -474,31 +475,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
             .filter((value): value is string => Boolean(value)),
         ).size;
 
-        const mapDomainStat = (doc: (typeof domainDocs)[number]) => ({
-          domain: String(doc.domain ?? ""),
-          visitCount: Number(doc.visitCount ?? 0),
-          bytesTransferred: Number(doc.bytesTransferred ?? 0),
-          firstVisitAt: doc.firstVisitAt
-            ? new Date(doc.firstVisitAt).toISOString()
-            : null,
-          lastVisitAt: doc.lastVisitAt
-            ? new Date(doc.lastVisitAt).toISOString()
-            : null,
-          lastNetwork: doc.lastNetwork ? String(doc.lastNetwork) : null,
-          lastPort:
-            typeof doc.lastPort === "number"
-              ? doc.lastPort
-              : doc.lastPort != null
-                ? Number(doc.lastPort)
-                : null,
-          lastRemoteAddr: doc.lastRemoteAddr
-            ? String(doc.lastRemoteAddr)
-            : null,
-          lastServerId: doc.lastServerId ? String(doc.lastServerId) : null,
-          lastServerIp: doc.lastServerIp ? String(doc.lastServerIp) : null,
-        });
-
-        const mappedDomainStats = domainDocs.map(mapDomainStat);
+        const mappedDomainStats = buildAdminDomainStats(domainDocs);
 
         const fallbackActiveDomainDocs =
           activeDomainDocs.length > 0
@@ -515,8 +492,7 @@ export const adminUserRoutes = new Elysia({ prefix: "/admin/users" })
                 })
                 .slice(0, ACTIVE_DOMAIN_LIMIT);
 
-        const activeDomains = fallbackActiveDomainDocs
-          .map(mapDomainStat)
+        const activeDomains = buildAdminDomainStats(fallbackActiveDomainDocs)
           .sort((a, b) => {
             const left = a.lastVisitAt ? new Date(a.lastVisitAt).getTime() : 0;
             const right = b.lastVisitAt ? new Date(b.lastVisitAt).getTime() : 0;

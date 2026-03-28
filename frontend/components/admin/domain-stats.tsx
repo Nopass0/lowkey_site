@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Globe, Search } from "lucide-react";
+import { Globe, Search, BarChart3 } from "lucide-react";
 import { AdminUserDomainStat } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { SiteFavicon } from "@/components/admin/site-favicon";
 
 function formatBytes(v: number) {
   if (!v || v <= 0) return "0 B";
@@ -70,6 +77,19 @@ export function DomainStats({ domains }: Props) {
   const visible = filtered.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
+  );
+  const topSites = useMemo(
+    () =>
+      domains
+        .slice()
+        .sort((left, right) => {
+          if (right.visitCount !== left.visitCount) {
+            return right.visitCount - left.visitCount;
+          }
+          return right.bytesTransferred - left.bytesTransferred;
+        })
+        .slice(0, 6),
+    [domains],
   );
 
   if (!domains.length) {
@@ -138,6 +158,34 @@ export function DomainStats({ domains }: Props) {
             </Button>
           </div>
         </div>
+
+        {topSites.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {topSites.map((item) => (
+              <div
+                key={`top:${item.domain}`}
+                className="rounded-[1.5rem] border border-border/50 bg-muted/20 p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <SiteFavicon domain={item.domain} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-muted-foreground/60">
+                      <BarChart3 className="mr-1 inline h-3.5 w-3.5" />
+                      Top usage
+                    </p>
+                    <div className="mt-1 truncate text-sm font-black">
+                      {item.domain}
+                    </div>
+                    <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{item.visitCount.toLocaleString("ru-RU")} visits</span>
+                      <span>{formatBytes(item.bytesTransferred)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="divide-y divide-border/30">
@@ -146,69 +194,101 @@ export function DomainStats({ domains }: Props) {
             key={`${item.domain}:${item.lastVisitAt ?? "none"}`}
             className="px-8 py-4 space-y-3 hover:bg-muted/20 transition-colors"
           >
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0 space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <a
-                    href={`https://${item.domain}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-base font-black truncate hover:text-violet-400 transition-colors"
-                  >
-                    {item.domain}
-                  </a>
-                  {item.lastNetwork && (
-                    <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                      {item.lastNetwork}
-                    </span>
-                  )}
-                  {item.lastPort != null && (
-                    <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                      :{item.lastPort}
-                    </span>
-                  )}
-                </div>
+            <Accordion type="single" collapsible>
+              <AccordionItem value={item.domain} className="border-none">
+                <AccordionTrigger className="py-0 hover:no-underline">
+                  <div className="flex w-full flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex items-center gap-3">
+                        <SiteFavicon domain={item.domain} />
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <a
+                              href={`https://${item.domain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-base font-black truncate hover:text-violet-400 transition-colors"
+                            >
+                              {item.domain}
+                            </a>
+                            {item.lastNetwork && (
+                              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                                {item.lastNetwork}
+                              </span>
+                            )}
+                            {item.lastPort != null && (
+                              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                                :{item.lastPort}
+                              </span>
+                            )}
+                          </div>
 
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>
-                    Last seen:{" "}
-                    {item.lastVisitAt
-                      ? new Date(item.lastVisitAt).toLocaleString("ru-RU")
-                      : "unknown"}
-                  </span>
-                  <span>
-                    First seen:{" "}
-                    {item.firstVisitAt
-                      ? new Date(item.firstVisitAt).toLocaleString("ru-RU")
-                      : "unknown"}
-                  </span>
-                </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span>
+                              Last seen:{" "}
+                              {item.lastVisitAt
+                                ? new Date(item.lastVisitAt).toLocaleString("ru-RU")
+                                : "unknown"}
+                            </span>
+                            <span>
+                              First seen:{" "}
+                              {item.firstVisitAt
+                                ? new Date(item.firstVisitAt).toLocaleString("ru-RU")
+                                : "unknown"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {item.lastRemoteAddr && <span>Remote: {item.lastRemoteAddr}</span>}
-                  {item.lastServerIp && <span>Server: {item.lastServerIp}</span>}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 shrink-0">
-                <div className="text-right">
-                  <div className="text-lg font-black tabular-nums">
-                    {item.visitCount.toLocaleString("ru-RU")}
+                    <div className="flex items-center gap-4 shrink-0">
+                      <div className="text-right">
+                        <div className="text-lg font-black tabular-nums">
+                          {item.visitCount.toLocaleString("ru-RU")}
+                        </div>
+                        <div className="text-xs text-muted-foreground uppercase tracking-wider">
+                          visits
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-black tabular-nums">
+                          {formatBytes(item.bytesTransferred)}
+                        </div>
+                        <div className="text-xs text-muted-foreground uppercase tracking-wider">
+                          bytes
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider">
-                    visits
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="rounded-[1.25rem] border border-border/40 bg-muted/15 p-4 text-sm text-muted-foreground">
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                      {item.lastRemoteAddr && <span>Remote: {item.lastRemoteAddr}</span>}
+                      {item.lastServerIp && <span>Server: {item.lastServerIp}</span>}
+                      {item.lastServerId && <span>Server ID: {item.lastServerId}</span>}
+                    </div>
+                    {item.sourceDomains.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <div className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/70">
+                          Raw domains grouped into this site
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.sourceDomains.map((domain) => (
+                            <span
+                              key={`${item.domain}:${domain}`}
+                              className="rounded-full border border-border/60 px-2.5 py-1 text-[11px] font-medium text-foreground/80"
+                            >
+                              {domain}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-black tabular-nums">
-                    {formatBytes(item.bytesTransferred)}
-                  </div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider">
-                    bytes
-                  </div>
-                </div>
-              </div>
-            </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
         ))}
       </div>

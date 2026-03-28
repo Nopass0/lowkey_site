@@ -5,6 +5,7 @@ import { Globe } from "lucide-react";
 import { AdminUserDomainStat } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SiteFavicon } from "@/components/admin/site-favicon";
 
 const PAGE_SIZE = 12;
 
@@ -85,16 +86,19 @@ export function CurrentDomainStats({
               key={`${site.domain}:${site.lastVisitAt ?? "none"}`}
               className="rounded-[1.5rem] border border-border/50 px-5 py-4 flex items-start justify-between gap-3"
             >
-              <div className="min-w-0 space-y-1">
-                <div className="font-black truncate">{site.domain}</div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>
-                    {site.lastVisitAt
-                      ? new Date(site.lastVisitAt).toLocaleString("ru-RU")
-                      : "Нет времени"}
-                  </span>
-                  {site.lastNetwork && <span>{site.lastNetwork}</span>}
-                  {site.lastPort != null && <span>:{site.lastPort}</span>}
+              <div className="min-w-0 flex items-start gap-3">
+                <SiteFavicon domain={site.domain} />
+                <div className="min-w-0 space-y-1">
+                  <div className="font-black truncate">{site.domain}</div>
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {site.lastVisitAt
+                        ? new Date(site.lastVisitAt).toLocaleString("ru-RU")
+                        : "Нет времени"}
+                    </span>
+                    {site.lastNetwork && <span>{site.lastNetwork}</span>}
+                    {site.lastPort != null && <span>:{site.lastPort}</span>}
+                  </div>
                 </div>
               </div>
               <div className="text-right shrink-0">
