@@ -143,7 +143,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sshpass rsync
 
-      - name: Upload project with rsync
+      - name: Establish SSH master connection
         shell: bash
         env:
           SSH_SERVER: ${{ secrets.SSH_SERVER }}
@@ -155,7 +155,7 @@ jobs:
             local max_attempts="$1"
             shift
             local attempt=1
-            local delay=5
+            local delay=10
             while true; do
               "$@"
               local exit_code=$?
@@ -169,10 +169,56 @@ jobs:
               sleep "${delay}"
               attempt=$((attempt + 1))
               delay=$((delay * 2))
+              if (( delay > 60 )); then
+                delay=60
+              fi
             done
           }
 
-          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          SSH_CONTROL_PATH="${RUNNER_TEMP}/lowkey-ssh-%C"
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
+
+          cat >> "$GITHUB_ENV" <<EOF
+          SSH_CONTROL_PATH=${SSH_CONTROL_PATH}
+          EOF
+
+          retry 6 sshpass -p "${SSH_PASSWORD}" ssh ${SSH_OPTS} -fN "${SSH_USER}@${SSH_SERVER}"
+          ssh ${SSH_OPTS} -O check "${SSH_USER}@${SSH_SERVER}"
+
+      - name: Upload project with rsync
+        shell: bash
+        env:
+          SSH_SERVER: ${{ secrets.SSH_SERVER }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_CONTROL_PATH: ${{ env.SSH_CONTROL_PATH }}
+        run: |
+          retry() {
+            local max_attempts="$1"
+            shift
+            local attempt=1
+            local delay=10
+            while true; do
+              "$@"
+              local exit_code=$?
+              if (( exit_code == 0 )); then
+                return 0
+              fi
+              if (( attempt >= max_attempts )); then
+                return "${exit_code}"
+              fi
+              echo "Attempt ${attempt}/${max_attempts} failed with exit code ${exit_code}. Retrying in ${delay}s..."
+              sleep "${delay}"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+              if (( delay > 60 )); then
+                delay=60
+              fi
+            done
+          }
+
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
           retry 4 sshpass -p "${SSH_PASSWORD}" rsync -az --delete \
             -e "ssh ${SSH_OPTS}" \
             --rsync-path="mkdir -p '${REMOTE_BASE}' && rsync" \
@@ -196,6 +242,7 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_CONTROL_PATH: ${{ env.SSH_CONTROL_PATH }}
           APP_ENV: ${{ env.APP_ENV }}
           DOMAIN: ${{ env.DOMAIN }}
           AI_DOMAIN: ${{ env.AI_DOMAIN }}
@@ -252,7 +299,7 @@ jobs:
             local max_attempts="$1"
             shift
             local attempt=1
-            local delay=5
+            local delay=10
             while true; do
               "$@"
               local exit_code=$?
@@ -266,10 +313,13 @@ jobs:
               sleep "${delay}"
               attempt=$((attempt + 1))
               delay=$((delay * 2))
+              if (( delay > 60 )); then
+                delay=60
+              fi
             done
           }
 
-          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
           retry 4 sshpass -p "${SSH_PASSWORD}" ssh \
             ${SSH_OPTS} \
             "${SSH_USER}@${SSH_SERVER}" \
@@ -336,6 +386,7 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_CONTROL_PATH: ${{ env.SSH_CONTROL_PATH }}
           REMOTE_BASE: ${{ env.REMOTE_BASE }}
           APP_ENV: main
           DOMAIN: english.lowkey.su
@@ -372,7 +423,7 @@ jobs:
             local max_attempts="$1"
             shift
             local attempt=1
-            local delay=5
+            local delay=10
             while true; do
               "$@"
               local exit_code=$?
@@ -386,10 +437,13 @@ jobs:
               sleep "${delay}"
               attempt=$((attempt + 1))
               delay=$((delay * 2))
+              if (( delay > 60 )); then
+                delay=60
+              fi
             done
           }
 
-          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
           retry 4 sshpass -p "${SSH_PASSWORD}" ssh \
             ${SSH_OPTS} \
             "${SSH_USER}@${SSH_SERVER}" \
@@ -452,13 +506,14 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_CONTROL_PATH: ${{ env.SSH_CONTROL_PATH }}
           REMOTE_BASE: ${{ env.REMOTE_BASE }}
         run: |
           retry() {
             local max_attempts="$1"
             shift
             local attempt=1
-            local delay=5
+            local delay=10
             while true; do
               "$@"
               local exit_code=$?
@@ -472,10 +527,13 @@ jobs:
               sleep "${delay}"
               attempt=$((attempt + 1))
               delay=$((delay * 2))
+              if (( delay > 60 )); then
+                delay=60
+              fi
             done
           }
 
-          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
           retry 2 sshpass -p "${SSH_PASSWORD}" ssh \
             ${SSH_OPTS} \
             "${SSH_USER}@${SSH_SERVER}" \
@@ -490,3 +548,19 @@ jobs:
              nginx -T 2>/dev/null | sed -n '/server_name english.lowkey.su/,/}/p' || true && \
              docker logs --tail=200 english-backend || true && \
              docker logs --tail=200 english-frontend || true"
+
+      - name: Close SSH master connection
+        if: always()
+        shell: bash
+        env:
+          SSH_SERVER: ${{ secrets.SSH_SERVER }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_CONTROL_PATH: ${{ env.SSH_CONTROL_PATH }}
+        run: |
+          if [[ -z "${SSH_CONTROL_PATH:-}" ]]; then
+            exit 0
+          fi
+
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=${SSH_CONTROL_PATH} -o LogLevel=ERROR"
+          ssh ${SSH_OPTS} -O exit "${SSH_USER}@${SSH_SERVER}" || true
