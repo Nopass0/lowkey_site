@@ -307,7 +307,7 @@ async function startVoidDb() {
     `VOIDDB_API_KEY=${VOIDDB_API_KEY}`,
     "-e",
     "VOIDDB_PORT=7700",
-    "nopass0/voiddb:latest",
+    "ghcr.io/nopass0/voiddb:latest",
   ]);
 
   const ready = await waitForHttp(healthUrl, "VoidDB", 90);

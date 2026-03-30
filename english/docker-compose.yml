@@ -1,6 +1,6 @@
 services:
   voiddb:
-    image: nopass0/voiddb:latest
+    image: ghcr.io/nopass0/voiddb:latest
     container_name: english-voiddb
     restart: unless-stopped
     ports:
