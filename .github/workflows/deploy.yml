@@ -430,3 +430,66 @@ jobs:
              BITNET_TEMPERATURE='${BITNET_TEMPERATURE}' \
              BITNET_N_PREDICT='${BITNET_N_PREDICT}' \
              ./deploy/scripts/deploy.sh"
+
+      - name: Verify English public health
+        if: github.ref_name == 'main'
+        shell: bash
+        run: |
+          for attempt in {1..24}; do
+            if curl -fsS https://english.lowkey.su/api/health >/dev/null 2>&1 &&
+               curl -fsS https://english.lowkey.su/ >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "English public health check attempt ${attempt}/24 failed, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "english.lowkey.su is still unhealthy after deploy" >&2
+          exit 1
+
+      - name: Capture English diagnostics
+        if: ${{ failure() && github.ref_name == 'main' }}
+        shell: bash
+        env:
+          SSH_SERVER: ${{ secrets.SSH_SERVER }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          REMOTE_BASE: ${{ env.REMOTE_BASE }}
+        run: |
+          retry() {
+            local max_attempts="$1"
+            shift
+            local attempt=1
+            local delay=5
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              local exit_code=$?
+              if (( attempt >= max_attempts )); then
+                return "${exit_code}"
+              fi
+              echo "Attempt ${attempt}/${max_attempts} failed with exit code ${exit_code}. Retrying in ${delay}s..."
+              sleep "${delay}"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+
+          SSH_OPTS="-p ${SSH_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o TCPKeepAlive=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          retry 2 sshpass -p "${SSH_PASSWORD}" ssh \
+            ${SSH_OPTS} \
+            "${SSH_USER}@${SSH_SERVER}" \
+            "set -x && \
+             cd '${REMOTE_BASE}/english' && \
+             docker compose --env-file .env.compose ps || true && \
+             docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' | grep 'english-' || true && \
+             curl -sv http://127.0.0.1:3302/health || true && \
+             curl -sv http://127.0.0.1:3303/ -o /tmp/english_frontend_body.txt || true && \
+             tail -n 40 /tmp/english_frontend_body.txt || true && \
+             ss -lntp | grep -E ':3302|:3303|:8180' || true && \
+             nginx -T 2>/dev/null | sed -n '/server_name english.lowkey.su/,/}/p' || true && \
+             docker logs --tail=200 english-backend || true && \
+             docker logs --tail=200 english-frontend || true && \
+             docker logs --tail=200 english-bitllm || true"
