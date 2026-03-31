@@ -17,6 +17,8 @@ export interface QueryOptions {
   offset?: number;
 }
 
+type QueryInput = QueryOptions | FilterOp[];
+
 let authPromise: Promise<VoidClient> | null = null;
 
 function mapField(field: string) {
@@ -50,7 +52,16 @@ function normalizeRow<T extends Record<string, any> | null>(row: T) {
   };
 }
 
-function buildQuery(opts: QueryOptions = {}) {
+function normalizeQueryOptions(input: QueryInput = {}): QueryOptions {
+  if (Array.isArray(input)) {
+    return { filters: input };
+  }
+
+  return input || {};
+}
+
+function buildQuery(input: QueryInput = {}) {
+  const opts = normalizeQueryOptions(input);
   let builder = query();
 
   for (const filter of opts.filters || []) {
@@ -82,6 +93,11 @@ function createClient(token?: string) {
 function isAuthError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "");
   return /invalid or expired token|unauthorized|forbidden|401|403/i.test(message);
+}
+
+function isMissingBucketError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /bucket|blob|not found|404/i.test(message);
 }
 
 async function getClient() {
@@ -141,7 +157,7 @@ export const db = {
     return normalizeRow(rows.first());
   },
 
-  async findMany(collection: string, opts: QueryOptions = {}) {
+  async findMany(collection: string, opts: QueryInput = {}) {
     const handle = await getCollection(collection);
     const rows = await handle.find(buildQuery(opts));
     return rows.toArray().map((row) => normalizeRow(row));
@@ -171,7 +187,21 @@ export const db = {
     options?: { filename?: string; contentType?: string; bucket?: string },
   ) {
     const handle = await getCollection(collection);
-    return handle.uploadFile(id, field, source, options);
+    try {
+      return await handle.uploadFile(id, field, source, options);
+    } catch (error) {
+      if (options?.bucket && isMissingBucketError(error)) {
+        console.warn(
+          "[voiddb] upload failed for bucket %s, retrying with default bucket for %s.%s",
+          options.bucket,
+          collection,
+          field,
+        );
+        const { bucket: _bucket, ...fallbackOptions } = options;
+        return handle.uploadFile(id, field, source, fallbackOptions);
+      }
+      throw error;
+    }
   },
 
   async deleteFile(collection: string, id: string, field: string) {

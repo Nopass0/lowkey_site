@@ -125,6 +125,7 @@ Return JSON:
     const attempt = await db.create("EnglishQuestAttempts", {
       userId: user.id,
       questId: params.id,
+      userResponse: "",
       status: "in_progress",
     });
     return { attempt, quest };

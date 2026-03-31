@@ -262,7 +262,7 @@ export default function CourseViewPage() {
   if (!course) return <div className="text-center text-white/50 py-20">Курс не найден</div>;
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto rounded-[32px] bg-slate-950 text-white p-4 md:p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
       {/* Back */}
       <button onClick={() => router.back()} className="flex items-center gap-1 text-white/40 hover:text-white/70 text-sm mb-4 transition-colors">
         <ArrowLeft className="w-4 h-4" />

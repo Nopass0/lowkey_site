@@ -8,6 +8,14 @@ type TtsResult =
   | { ok: true; buffer: Uint8Array; contentType: string }
   | { ok: false; status: number; message: string; loading?: boolean };
 
+type SuccessfulTtsResult = Extract<TtsResult, { ok: true }> & { model: string };
+type FailedTtsResult = Extract<TtsResult, { ok: false }> & { model?: string };
+
+const DEFAULT_TTS_MODELS = [
+  "hexgrad/Kokoro-82M",
+  "facebook/mms-tts-eng",
+];
+
 async function requestTtsFromEndpoint(
   url: string,
   token: string,
@@ -40,37 +48,57 @@ async function requestTtsFromEndpoint(
   };
 }
 
-async function requestTtsAudio(model: string, token: string, text: string): Promise<TtsResult> {
-  const endpoints = [
-    `https://router.huggingface.co/hf-inference/models/${model}`,
-    `https://api-inference.huggingface.co/models/${model}`,
-  ];
+function buildModelCandidates(...models: Array<string | undefined>) {
+  return [...new Set(
+    models
+      .flatMap((model) => (model ? [model] : []))
+      .concat(DEFAULT_TTS_MODELS)
+      .map((model) => model.trim())
+      .filter(Boolean),
+  )];
+}
+
+async function requestTtsAudio(models: string[], token: string, text: string): Promise<SuccessfulTtsResult | FailedTtsResult> {
   const payloads = [
     { inputs: text },
     { text_inputs: text },
   ];
 
-  let lastError: TtsResult | null = null;
+  let lastError: FailedTtsResult | null = null;
+  let loadingSeen = false;
 
-  for (const endpoint of endpoints) {
+  for (const model of models) {
+    const endpoint = `https://router.huggingface.co/hf-inference/models/${model}`;
     for (const payload of payloads) {
       try {
         const result = await requestTtsFromEndpoint(endpoint, token, payload);
         if (result.ok) {
-          return result;
+          return { ...result, model };
         }
-        lastError = result;
+        lastError = { ...result, model };
         if (result.loading) {
-          return result;
+          loadingSeen = true;
+          break;
         }
       } catch (error) {
         lastError = {
           ok: false,
           status: 500,
           message: error instanceof Error ? error.message : "unknown TTS error",
+          model,
         };
       }
     }
+  }
+
+  if (loadingSeen) {
+    return {
+      ok: false,
+      status: 503,
+      message: "All configured TTS models are currently loading on HuggingFace.",
+      loading: true,
+      model: lastError?.model,
+    };
   }
 
   return lastError || {
@@ -107,29 +135,30 @@ export const ttsRoutes = new Elysia({ prefix: "/tts" })
         return { error: "HuggingFace API token not set in admin" };
       }
 
-      const model = customModel || hfSettings.ttsModel;
+      const modelCandidates = buildModelCandidates(customModel, hfSettings.ttsModel, config.huggingface.ttsModel);
+      const requestedModel = modelCandidates[0];
 
-      if (cached && cached.audioUrl && cached.model === model) {
+      if (cached && cached.audioUrl && cached.model === requestedModel) {
         return { audioUrl: cached.audioUrl, cached: true };
       }
 
       try {
-        const result = await requestTtsAudio(model, hfSettings.apiToken, normalizedText);
+        const result = await requestTtsAudio(modelCandidates, hfSettings.apiToken, normalizedText);
         if (!result.ok) {
-          console.error(`[hf-tts] error from ${model}:`, result.status, result.message.slice(0, 300));
+          console.error(`[hf-tts] error from ${result.model || requestedModel}:`, result.status, result.message.slice(0, 300));
 
           if (result.loading) {
             set.status = 503;
             return { error: "Model is loading on HuggingFace, try again in a moment." };
           }
 
-          set.status = result.status >= 500 ? 502 : result.status;
+          set.status = 502;
           return { error: "Speech generation failed" };
         }
 
         let cacheItem = cached;
         if (!cacheItem) {
-          cacheItem = await db.create("EnglishSoundCache", { text: normalizedText, model });
+          cacheItem = await db.create("EnglishSoundCache", { text: normalizedText, model: result.model });
         }
         
         if (!cacheItem) {
@@ -151,9 +180,9 @@ export const ttsRoutes = new Elysia({ prefix: "/tts" })
         });
 
         const audioUrl = await db.blobUrl("EnglishSoundCache", ref);
-        await db.update("EnglishSoundCache", cacheItem.id, { audioUrl, model });
+        await db.update("EnglishSoundCache", cacheItem.id, { audioUrl, model: result.model });
 
-        return { audioUrl, cached: false };
+        return { audioUrl, cached: false, model: result.model };
       } catch (error) {
         console.error("[hf-tts] exception:", error);
         set.status = 500;

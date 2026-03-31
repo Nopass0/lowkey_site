@@ -4,6 +4,10 @@ import { config } from "../config";
 
 let bot: Bot | null = null;
 
+function hasPlaceholderTelegramToken(token: string) {
+  return /your-bot-token|botfather/i.test(token);
+}
+
 export function getBot(): Bot | null {
   return bot;
 }
@@ -11,6 +15,11 @@ export function getBot(): Bot | null {
 export async function initBot() {
   if (!config.telegram.botToken) {
     console.log("[Telegram] No bot token configured, skipping");
+    return;
+  }
+
+  if (hasPlaceholderTelegramToken(config.telegram.botToken)) {
+    console.log("[Telegram] Placeholder bot token configured, skipping");
     return;
   }
 
@@ -144,12 +153,20 @@ export async function initBot() {
     );
   });
 
-  if (config.telegram.webhookUrl) {
-    await bot.api.setWebhook(`${config.telegram.webhookUrl}/telegram/webhook`);
-    console.log("[Telegram] Webhook set");
-  } else {
+  const isLocalFrontend = /localhost|127\.0\.0\.1/i.test(config.frontendUrl);
+
+  if (config.telegram.webhookUrl && !isLocalFrontend) {
+    try {
+      await bot.api.setWebhook(`${config.telegram.webhookUrl.replace(/\/$/, "")}/telegram/webhook`);
+      console.log("[Telegram] Webhook set");
+    } catch (error) {
+      console.warn("[Telegram] Failed to set webhook, skipping bot startup:", error);
+    }
+  } else if (!config.telegram.webhookUrl) {
     bot.start();
     console.log("[Telegram] Bot started in polling mode");
+  } else {
+    console.log("[Telegram] Local frontend detected, skipping webhook setup");
   }
 
   console.log("[Telegram] Bot initialized");

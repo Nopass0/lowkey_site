@@ -262,6 +262,18 @@ database {
     @@map("EnglishGrammarTestResults")
   }
 
+  model EnglishGrammarExplainCache {
+    id String @id @map("_id")
+    textKey String @unique
+    text String
+    question String?
+    topicId String?
+    explanation String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+    @@map("EnglishGrammarExplainCache")
+  }
+
   model EnglishQuests {
     id String @id @map("_id")
     title String

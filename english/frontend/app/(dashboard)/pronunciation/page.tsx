@@ -137,6 +137,9 @@ export default function PronunciationPage() {
         if (mode === "words" && selectedWord.ipa) {
           formData.append("targetIpa", selectedWord.ipa);
         }
+        if (spoken) {
+          formData.append("spokenTextHint", spoken);
+        }
         data = await aiApi.analyzePronunciationAudio(formData);
       } else {
         data = await aiApi.analyzePronunciation({
@@ -462,6 +465,28 @@ export default function PronunciationPage() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+
+                {analysis.phonemeFeedback && analysis.phonemeFeedback.length > 0 && (
+                  <div className="glass-card rounded-xl p-4">
+                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Р Р°Р·Р±РѕСЂ РїРѕ СѓС‡Р°СЃС‚РєР°Рј</div>
+                    <div className="space-y-2">
+                      {analysis.phonemeFeedback.map((item, index) => (
+                        <div key={`${item.phoneme}-${index}`} className="rounded-xl border border-border/60 bg-accent/30 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium">РћР¶РёРґР°Р»РѕСЃСЊ: <span className="text-primary">{item.phoneme}</span></div>
+                              <div className="text-xs text-muted-foreground mt-1">Р Р°СЃРїРѕР·РЅР°РЅРѕ: {item.spoken || "вЂ”"}</div>
+                            </div>
+                            <span className={cn("text-[11px] font-semibold px-2 py-1 rounded-full", item.correct ? "bg-emerald-500/15 text-emerald-500" : "bg-amber-500/15 text-amber-500")}>
+                              {item.correct ? "OK" : "РџСЂРѕРІРµСЂСЊ"}
+                            </span>
+                          </div>
+                          {item.tip && <div className="text-xs text-muted-foreground mt-2">{item.tip}</div>}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

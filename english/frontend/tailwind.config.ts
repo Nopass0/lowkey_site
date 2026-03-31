@@ -91,7 +91,7 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        sans: ["system-ui", "sans-serif"],
       },
     },
   },

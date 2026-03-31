@@ -5,6 +5,7 @@ const { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlink
 const path = require("path");
 const http = require("http");
 const https = require("https");
+const net = require("net");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const SITE_ROOT_DIR = path.resolve(ROOT_DIR, "..");
@@ -181,6 +182,61 @@ async function waitForHttp(url, label, timeoutSeconds = 120) {
   }
 
   return false;
+}
+
+function isPortBusy(port, host = "127.0.0.1") {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+
+    server.once("error", (error) => {
+      if (error && error.code === "EADDRINUSE") {
+        resolve(true);
+        return;
+      }
+
+      resolve(false);
+    });
+
+    server.once("listening", () => {
+      server.close(() => resolve(false));
+    });
+
+    server.listen(port, host);
+  });
+}
+
+async function ensurePortFree(port, label) {
+  const busy = await isPortBusy(port);
+  if (busy) {
+    throw new Error(`${label} port ${port} is already in use. Stop the existing process or run npm run stop first.`);
+  }
+}
+
+function getListeningPids(port) {
+  if (!IS_WIN) {
+    return [];
+  }
+
+  const result = run("cmd", ["/d", "/s", "/c", `netstat -ano -p tcp | findstr LISTENING | findstr :${port}`], {
+    capture: true,
+    allowFail: true,
+  });
+
+  if (result.status !== 0) {
+    return [];
+  }
+
+  return [...new Set(
+    (result.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split(/\s+/);
+        return Number.parseInt(parts[parts.length - 1] || "", 10);
+      })
+      .filter((value) => Number.isInteger(value) && value > 0),
+  )];
 }
 
 function hasTool(command) {
@@ -483,6 +539,15 @@ function printBanner(runtime) {
 async function start() {
   ensureDir(LOGS_DIR);
   ensureDir(STATE_DIR);
+
+  if (existsSync(STATE_FILE)) {
+    logWarn("existing dev state found, stopping it before restart");
+    await stopAll();
+  }
+
+  await ensurePortFree(PORTS.backend, "backend");
+  await ensurePortFree(PORTS.frontend, "frontend");
+
   const runtime = ensureEnvFiles();
   ensureDependencies();
 
@@ -530,7 +595,12 @@ async function start() {
   }
 
   saveState({
-    pids: [backend.pid, frontend.pid],
+    pids: [...new Set([
+      backend.pid,
+      frontend.pid,
+      ...getListeningPids(PORTS.backend),
+      ...getListeningPids(PORTS.frontend),
+    ].filter((value) => Number.isInteger(value) && value > 0))],
   });
 
   const cleanup = async () => {

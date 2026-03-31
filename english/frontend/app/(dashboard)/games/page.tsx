@@ -46,6 +46,18 @@ export default function GamesPage() {
   const [savedWords, setSavedWords] = useState<string[]>([]);
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
 
+  const requestUniqueWord = async (used: string[]) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nextWord = await aiApi.associationGame({ words: used, difficulty });
+      const normalized = nextWord?.targetWord?.trim().toLowerCase();
+      if (normalized && !used.some((word) => word.trim().toLowerCase() === normalized)) {
+        return nextWord;
+      }
+    }
+
+    throw new Error("duplicate word");
+  };
+
   useEffect(() => {
     if (gameState !== "playing" || !currentWord || revealed) return;
     const t = setInterval(() => {
@@ -71,9 +83,10 @@ export default function GamesPage() {
 
   const loadNextWord = async (used: string[]) => {
     setLoading(true);
+    setCurrentWord(null);
     setRevealedClues(1); setGuess(""); setRevealed(false); setTimeLeft(30);
     try {
-      const word = await aiApi.associationGame({ words: used, difficulty });
+      const word = await requestUniqueWord(used);
       setCurrentWord(word);
     } catch { toast.error("Ошибка загрузки слова"); }
     finally { setLoading(false); }
@@ -84,10 +97,12 @@ export default function GamesPage() {
     const isCorrect = guess.trim().toLowerCase() === currentWord.targetWord.toLowerCase();
     if (isCorrect) {
       const pts = Math.max(10, 50 - (revealedClues - 1) * 10) + Math.floor(timeLeft * 0.5);
-      setScore((s) => s + pts);
-      setCorrect((c) => c + 1);
+      const nextScore = score + pts;
+      const nextCorrect = correct + 1;
+      setScore(nextScore);
+      setCorrect(nextCorrect);
       toast.success(`+${pts} очков!`);
-      nextRound(true);
+      nextRound(true, nextScore, nextCorrect);
     } else {
       toast.error("Неверно — попробуй ещё");
     }
@@ -98,7 +113,7 @@ export default function GamesPage() {
     setRevealedClues(currentWord?.clues.length || 4);
   };
 
-  const nextRound = (wasCorrect: boolean) => {
+  const nextRound = (wasCorrect: boolean, nextScore = score, nextCorrect = correct) => {
     if (!currentWord) return;
     const newUsed = [...usedWords, currentWord.targetWord];
     setUsedWords(newUsed);
@@ -107,8 +122,8 @@ export default function GamesPage() {
     if (newRound >= TOTAL_ROUNDS) {
       if (sessionId) {
         gamesApi.updateSession(sessionId, {
-          score, totalRounds: TOTAL_ROUNDS, correctAnswers: correct + (wasCorrect ? 1 : 0),
-          durationSeconds: TOTAL_ROUNDS * 30 - timeLeft, xpEarned: score,
+          score: nextScore, totalRounds: TOTAL_ROUNDS, correctAnswers: nextCorrect,
+          durationSeconds: TOTAL_ROUNDS * 30 - timeLeft, xpEarned: nextScore,
           wordsLearned: newUsed,
         }).catch(() => {});
       }

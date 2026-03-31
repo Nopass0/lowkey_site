@@ -278,7 +278,7 @@ export default function TestPage() {
   if (submitted && attempt) {
     const gradedAnswers = attempt.answers || [];
     return (
-      <div className="max-w-xl mx-auto">
+      <div className="max-w-xl mx-auto rounded-[32px] bg-slate-950 text-white p-4 md:p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
         <button onClick={() => router.back()} className="flex items-center gap-1 text-white/40 hover:text-white/70 text-sm mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Назад к курсу
@@ -370,7 +370,7 @@ export default function TestPage() {
   const canShowAll = questions.length <= 10;
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div className="max-w-xl mx-auto rounded-[32px] bg-slate-950 text-white p-4 md:p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
       <button onClick={() => router.back()} className="flex items-center gap-1 text-white/40 hover:text-white/70 text-sm mb-4 transition-colors">
         <ArrowLeft className="w-4 h-4" />
         Назад

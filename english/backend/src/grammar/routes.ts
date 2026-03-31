@@ -41,6 +41,32 @@ function buildGrammarFallbackExplanation(text: string, question?: string) {
   return "Смотри на форму глагола и на контекст предложения: время, регулярность, завершённость действия и роль подлежащего обычно подсказывают нужную конструкцию. Проверь три вещи: какой это момент во времени, меняется ли форма глагола и нужен ли вспомогательный глагол. Если сомневаешься, сравни утверждение, отрицание и вопрос для одной и той же фразы.";
 }
 
+function normalizeExplainValue(value: string) {
+  return value.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, " ");
+}
+
+function buildExplainCacheKey(text: string, question?: string) {
+  return `${normalizeExplainValue(text)}::${normalizeExplainValue(question || "")}`;
+}
+
+async function findRelatedTopic(text: string) {
+  const normalized = normalizeExplainValue(text);
+  if (!normalized) {
+    return null;
+  }
+
+  const topics = await db.findMany("EnglishGrammarTopics", {
+    limit: 200,
+    sort: [{ field: "orderIndex", direction: "asc" }],
+  });
+
+  return topics.find((topic: any) => {
+    const title = normalizeExplainValue(topic.title || "");
+    const slug = normalizeExplainValue((topic.slug || "").replace(/-/g, " "));
+    return normalized === title || normalized === slug || normalized.includes(title) || title.includes(normalized);
+  }) || null;
+}
+
 // callOpenRouter is now imported from ../ai/openrouter
 
 const GRAMMAR_SEED = [
@@ -302,25 +328,59 @@ Difficulty: 1=easy, 2=medium, 3=hard. Mix difficulties.`;
   .post("/explain", async ({ headers, body, jwt, set }) => {
     await getUser(headers, jwt, set);
     const { text, question } = body as { text: string; question: string };
+    const normalizedText = text.trim();
+    const normalizedQuestion = question?.trim() || "";
 
-    const systemPrompt = `You are an expert English grammar teacher. Give clear, concise explanations in Russian with English examples. Keep answers to 3-5 sentences.`;
-    const prompt = question
-      ? `Explain this English grammar question: "${question}". Context: "${text}"`
-      : `Explain this English grammar structure: "${text}"`;
-
-    const response = await callOpenRouter(prompt, systemPrompt);
-    if (response) {
-      return { explanation: response };
+    if (!normalizedText) {
+      set.status = 400;
+      return { error: "Text is required" };
     }
 
-    const legacySettings = await getAiSettings();
-    if (!legacySettings.apiKey) {
+    const cacheKey = buildExplainCacheKey(normalizedText, normalizedQuestion);
+    const cached = await db.findOne("EnglishGrammarExplainCache", [db.filter.eq("textKey", cacheKey)]);
+    if (cached?.explanation) {
       return {
-        explanation: `${buildGrammarFallbackExplanation(text, question)}\n\nOpenRouter API key is not configured in admin settings yet.`,
+        explanation: cached.explanation,
+        cached: true,
+        topicId: cached.topicId || null,
       };
     }
 
-    return { explanation: buildGrammarFallbackExplanation(text, question) };
+    const topic = await findRelatedTopic(normalizedText);
+
+    const systemPrompt = `You are an expert English grammar teacher. Give clear, concise explanations in Russian with English examples. Keep answers to 3-5 sentences.`;
+    const prompt = normalizedQuestion
+      ? `Explain this English grammar question: "${normalizedQuestion}". Context: "${normalizedText}"`
+      : `Explain this English grammar structure: "${normalizedText}"`;
+
+    const response = await callOpenRouter(prompt, systemPrompt);
+    let explanation = response || "";
+    const legacySettings = await getAiSettings();
+
+    if (!explanation) {
+      explanation = buildGrammarFallbackExplanation(normalizedText, normalizedQuestion);
+      if (!legacySettings.apiKey) {
+        explanation = `${explanation}\n\nOpenRouter API key is not configured in admin settings yet.`;
+      }
+    }
+
+    await db.upsert(
+      "EnglishGrammarExplainCache",
+      [db.filter.eq("textKey", cacheKey)],
+      {
+        textKey: cacheKey,
+        text: normalizedText,
+        question: normalizedQuestion || null,
+        topicId: topic?.id || null,
+        explanation,
+      },
+    );
+
+    return {
+      explanation,
+      cached: false,
+      topicId: topic?.id || null,
+    };
 
     // Provide a specific error so the user/admin knows what to fix
     const settings = await getAiSettings();

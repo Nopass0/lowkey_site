@@ -6,6 +6,11 @@ import { callOpenRouter, parseJsonFromAi } from "./openrouter";
 import { getHfSettings } from "./hf-settings";
 import { optimizeImageUpload } from "../media";
 
+const DEFAULT_SPEECH_MODELS = [
+  "openai/whisper-small.en",
+  "openai/whisper-small",
+];
+
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
   if (!token) { set.status = 401; throw new Error("Unauthorized"); }
@@ -30,6 +35,10 @@ function fallbackCardGeneration(word: string) {
 
 function normalizeText(value: string) {
   return value.trim().toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, "").replace(/\s+/g, " ");
+}
+
+function tokenizeNormalizedWords(value: string) {
+  return normalizeText(value).split(" ").filter(Boolean);
 }
 
 function calculateTextScore(target: string, spoken: string) {
@@ -57,8 +66,36 @@ function calculateTextScore(target: string, spoken: string) {
   return Math.max(0, Math.min(100, Math.round((wordScore * 0.7 + charScore * 0.3) * 100)));
 }
 
+function buildPronunciationBreakdown(targetText: string, spokenText: string, targetIpa?: string) {
+  const targetWords = tokenizeNormalizedWords(targetText);
+  const spokenWords = tokenizeNormalizedWords(spokenText);
+
+  return targetWords
+    .map((expected, index) => {
+      if (spokenWords[index] === expected) {
+        return null;
+      }
+
+      const matchingWordElsewhere = spokenWords.find((word) => word === expected);
+      const actual = spokenWords[index] || matchingWordElsewhere || "";
+      const tip = targetIpa && targetWords.length === 1
+        ? `Сравни с эталонной IPA: ${targetIpa}`
+        : actual
+          ? `Проверь слово "${expected}" в этом участке записи и повтори его отдельно.`
+          : `Слово "${expected}" не распознано. Повтори фразу медленнее и ближе к микрофону.`;
+
+      return {
+        expected,
+        actual: actual || "не распознано",
+        tip,
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildFallbackPronunciationAnalysis(targetText: string, spokenText: string, targetIpa?: string) {
   const score = spokenText ? calculateTextScore(targetText, spokenText) : 35;
+  const phonemeErrors = score >= 85 ? [] : buildPronunciationBreakdown(targetText, spokenText, targetIpa);
   const suggestions = score >= 85
     ? ["Повтори фразу в обычном темпе и затем ускорься.", "Закрепи произношение в связной речи."]
     : [
@@ -87,23 +124,47 @@ function buildFallbackPronunciationAnalysis(targetText: string, spokenText: stri
   };
 }
 
-async function transcribeAudioWithHf(file: File) {
-  const settings = await getHfSettings();
-  if (!settings.apiToken) {
+function buildSpeechModelCandidates(...models: Array<string | undefined>) {
+  return [...new Set(
+    models
+      .flatMap((model) => (model ? [model] : []))
+      .concat(DEFAULT_SPEECH_MODELS)
+      .map((model) => model.trim())
+      .filter(Boolean),
+  )];
+}
+
+function parseSpeechResponse(raw: string) {
+  if (!raw.trim()) {
     return null;
   }
 
-  const endpoints = [
-    `https://router.huggingface.co/hf-inference/models/${settings.speechModel}`,
-    `https://api-inference.huggingface.co/models/${settings.speechModel}`,
-  ];
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") return parsed.trim();
+    if (typeof parsed?.text === "string") return parsed.text.trim();
+    if (Array.isArray(parsed) && typeof parsed[0]?.text === "string") return parsed[0].text.trim();
+    if (typeof parsed?.generated_text === "string") return parsed.generated_text.trim();
+  } catch {
+    return raw.trim();
+  }
+
+  return null;
+}
+
+async function transcribeAudioWithHf(file: File, spokenTextHint?: string) {
+  const settings = await getHfSettings();
+  if (!settings.apiToken) {
+    return spokenTextHint?.trim() || null;
+  }
 
   const payload = await file.arrayBuffer();
   const contentType = file.type || "audio/webm";
+  const models = buildSpeechModelCandidates(settings.speechModel, config.huggingface.speechModel);
 
-  for (const endpoint of endpoints) {
+  for (const model of models) {
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(`https://router.huggingface.co/hf-inference/models/${model}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${settings.apiToken}`,
@@ -114,21 +175,20 @@ async function transcribeAudioWithHf(file: File) {
 
       const raw = await response.text();
       if (!response.ok) {
-        console.error("[hf-asr] error from %s: %d %s", settings.speechModel, response.status, raw.slice(0, 300));
+        console.error("[hf-asr] error from %s: %d %s", model, response.status, raw.slice(0, 300));
         continue;
       }
 
-      const parsed = JSON.parse(raw);
-      if (typeof parsed === "string") return parsed.trim();
-      if (typeof parsed?.text === "string") return parsed.text.trim();
-      if (Array.isArray(parsed) && typeof parsed[0]?.text === "string") return parsed[0].text.trim();
-      if (typeof parsed?.generated_text === "string") return parsed.generated_text.trim();
+      const parsed = parseSpeechResponse(raw);
+      if (parsed) {
+        return parsed;
+      }
     } catch (error) {
       console.error("[hf-asr] transcription failed:", error);
     }
   }
 
-  return null;
+  return spokenTextHint?.trim() || null;
 }
 
 export const aiRoutes = new Elysia({ prefix: "/ai" })
@@ -271,6 +331,7 @@ Return ONLY valid JSON in this format:
 }`;
 
     const excludeWords = words?.join(", ") || "";
+    const excludedWords = new Set((words || []).map((word) => normalizeText(word)));
     const prompt = `Create an association game round for ${difficulty} level English learner.
 ${excludeWords ? `Avoid these recently used words: ${excludeWords}` : ""}
 Create 4 progressive clues (from hard to easy) that help guess the target word.
@@ -283,13 +344,21 @@ Choose an interesting, useful everyday English word.`;
       gameData = parseJsonFromAi(aiResponse, null);
     }
 
+    if (gameData?.targetWord && excludedWords.has(normalizeText(gameData.targetWord))) {
+      gameData = null;
+    }
+
     if (!gameData) {
       // Fallback word list
       const fallbacks = [
         { targetWord: "ambiguous", clues: ["Not clear", "Can be interpreted multiple ways", "Causes confusion", "Neither yes nor no"], category: "adjectives", definition: "open to more than one interpretation", translation: "неоднозначный", pronunciation: "/æmˈbɪɡjuəs/", examples: ["The message was ambiguous."] },
         { targetWord: "resilient", clues: ["Bounces back", "Strong character", "Doesn't give up easily", "Like rubber"], category: "adjectives", definition: "able to recover quickly from difficulties", translation: "стойкий", pronunciation: "/rɪˈzɪliənt/", examples: ["She is very resilient."] },
       ];
-      gameData = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      fallbacks.push(
+        { targetWord: "curious", clues: ["Wants to know more", "Asks many questions", "Interested in discovering things", "Opposite of indifferent"], category: "adjectives", definition: "eager to know or learn something", translation: "любопытный", pronunciation: "/ˈkjʊəriəs/", examples: ["Children are naturally curious."] },
+        { targetWord: "journey", clues: ["A trip from one place to another", "Longer than a simple walk", "Travel with a destination", "You can take it by train or car"], category: "nouns", definition: "an act of traveling from one place to another", translation: "путешествие", pronunciation: "/ˈdʒɜːrni/", examples: ["The journey took three hours."] },
+      );
+      gameData = fallbacks.find((item) => !excludedWords.has(normalizeText(item.targetWord))) || fallbacks[0];
     }
 
     return gameData;
@@ -344,13 +413,14 @@ Analyze their pronunciation accuracy (score 0-100) and provide constructive feed
     const file = formData.get("file") as File | null;
     const targetText = String(formData.get("targetText") || "").trim();
     const targetIpa = String(formData.get("targetIpa") || "").trim();
+    const spokenTextHint = String(formData.get("spokenTextHint") || "").trim();
 
     if (!file || !targetText) {
       set.status = 400;
       return { error: "file and targetText are required" };
     }
 
-    const spokenText = (await transcribeAudioWithHf(file)) || "";
+    const spokenText = (await transcribeAudioWithHf(file, spokenTextHint)) || "";
     return buildFallbackPronunciationAnalysis(targetText, spokenText, targetIpa);
   })
 
