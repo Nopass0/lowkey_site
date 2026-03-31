@@ -1,3 +1,4 @@
+import axios from "axios";
 import { getAiSettings } from "./settings";
 
 export type CallOptions = {
@@ -35,15 +36,9 @@ export async function callOpenRouter(
 
   for (const model of models) {
     try {
-      const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.apiKey}`,
-          "HTTP-Referer": settings.siteUrl,
-          "X-Title": settings.siteName,
-        },
-        body: JSON.stringify({
+      const res = await axios.post(
+        `${settings.baseUrl}/chat/completions`,
+        {
           model,
           messages: [
             { role: "system", content: systemPrompt },
@@ -51,32 +46,43 @@ export async function callOpenRouter(
           ],
           max_tokens: opts.maxTokens ?? settings.maxTokens,
           temperature: opts.temperature ?? settings.temperature,
-        }),
-      });
+        },
+        {
+          adapter: "http",
+          timeout: 120_000,
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${settings.apiKey}`,
+            "HTTP-Referer": settings.siteUrl,
+            "X-Title": settings.siteName,
+          },
+        },
+      );
 
-      if (!res.ok) {
-        const details = await res.text().catch(() => "");
-        console.error(
-          "[openrouter] API error %d for model %s: %s",
-          res.status,
-          model,
-          details.slice(0, 500),
-        );
-
-        if (res.status === 401 || res.status === 403) {
-          return null;
-        }
-
-        continue;
-      }
-
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content || "";
+      const content = res.data?.choices?.[0]?.message?.content || "";
       if (content) {
         return content;
       }
     } catch (error) {
-      console.error(`[openrouter] fetch failed for model ${model}:`, error);
+      const response = (error as any)?.response;
+      if (response) {
+        const details = typeof response.data === "string"
+          ? response.data
+          : JSON.stringify(response.data || {});
+        console.error(
+          "[openrouter] API error %d for model %s: %s",
+          response.status,
+          model,
+          details.slice(0, 500),
+        );
+
+        if (response.status === 401 || response.status === 403) {
+          return null;
+        }
+      } else {
+        console.error(`[openrouter] request failed for model ${model}:`, error);
+      }
     }
   }
 

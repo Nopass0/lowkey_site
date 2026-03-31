@@ -1,5 +1,6 @@
 import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
+import axios from "axios";
 import { config } from "../config";
 import { db } from "../db";
 import { callOpenRouter, parseJsonFromAi } from "./openrouter";
@@ -7,9 +8,49 @@ import { getHfSettings } from "./hf-settings";
 import { optimizeImageUpload } from "../media";
 
 const DEFAULT_SPEECH_MODELS = [
+  "openai/whisper-large-v3",
+];
+
+const UNSUPPORTED_SPEECH_MODELS = new Set([
   "openai/whisper-small.en",
   "openai/whisper-small",
+]);
+
+const SUPPORTED_FAL_AUDIO_TYPES = [
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/wav",
+  "audio/x-wav",
 ];
+
+type ProviderMappingEntry = {
+  provider: string;
+  providerId: string;
+  hfModelId?: string;
+  task?: string;
+  status?: string;
+};
+
+type SpeechAttempt = {
+  model: string;
+  provider: string;
+  status: number;
+  message: string;
+};
+
+type SpeechRequestResult =
+  | { ok: true; text: string; provider: string }
+  | { ok: false; status: number; message: string; provider: string };
+
+type SpeechTranscription = {
+  text: string;
+  model: string | null;
+  provider: string | null;
+  attempts: SpeechAttempt[];
+  usedHint: boolean;
+};
+
+const speechProviderMappingCache = new Map<string, { expiresAt: number; mappings: ProviderMappingEntry[] }>();
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -120,6 +161,104 @@ function buildFallbackPronunciationAnalysis(targetText: string, spokenText: stri
           actual: spokenText || "не распознано",
           tip: targetIpa ? `Сравни с эталонной IPA: ${targetIpa}` : "Сравни свою запись с эталонным озвучиванием.",
         }],
+    phonemeErrors,
+    spokenText,
+  };
+}
+
+function normalizeAnalysisItems(value: unknown, fallback: Array<{ expected: string; actual: string; tip: string }>) {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const normalized = value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const expected = typeof (item as any).expected === "string" ? (item as any).expected.trim() : "";
+      const actual = typeof (item as any).actual === "string" ? (item as any).actual.trim() : "";
+      const tip = typeof (item as any).tip === "string" ? (item as any).tip.trim() : "";
+      if (!expected && !actual && !tip) {
+        return null;
+      }
+
+      return {
+        expected: expected || "segment",
+        actual: actual || "not recognized",
+        tip: tip || "Compare this segment with the reference and repeat it separately.",
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+async function buildPronunciationAnalysis(targetText: string, spokenText: string, targetIpa?: string) {
+  const fallback = buildFallbackPronunciationAnalysis(targetText, spokenText, targetIpa);
+  if (!spokenText.trim()) {
+    return fallback;
+  }
+
+  const systemPrompt = `You are an English pronunciation coach.
+Return ONLY valid JSON with this exact shape:
+{
+  "score": 78,
+  "feedback": "Short user-facing summary in Russian.",
+  "suggestions": ["Russian suggestion 1", "Russian suggestion 2"],
+  "improvements": ["Russian suggestion 1", "Russian suggestion 2"],
+  "phonemeErrors": [
+    {
+      "expected": "target word or segment",
+      "actual": "what the learner likely said",
+      "tip": "Specific correction in Russian"
+    }
+  ]
+}
+Base the score on the difference between the target text and the recognized spoken text.
+Do not invent acoustic details you cannot infer from the transcript.
+If the phrase contains several words, point out the specific mismatching words or segments.`;
+
+  const prompt = `Target text: "${targetText}"
+Recognized spoken text: "${spokenText}"
+${targetIpa ? `Reference IPA: "${targetIpa}"` : ""}
+
+Analyze where the learner deviated from the target.
+Keep the feedback concise, practical, and in Russian.`;
+
+  const aiResponse = await callOpenRouter(prompt, systemPrompt, {
+    maxTokens: 1200,
+    temperature: 0.2,
+  });
+
+  if (!aiResponse) {
+    return fallback;
+  }
+
+  const parsed = parseJsonFromAi<any>(aiResponse, null);
+  if (!parsed || typeof parsed !== "object") {
+    return fallback;
+  }
+
+  const nextScore = typeof parsed.score === "number"
+    ? Math.max(0, Math.min(100, Math.round(parsed.score)))
+    : fallback.score;
+  const suggestions = Array.isArray(parsed.suggestions)
+    ? parsed.suggestions.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+    : fallback.suggestions;
+  const improvements = Array.isArray(parsed.improvements)
+    ? parsed.improvements.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+    : suggestions;
+
+  return {
+    score: nextScore,
+    feedback: typeof parsed.feedback === "string" && parsed.feedback.trim()
+      ? parsed.feedback.trim()
+      : fallback.feedback,
+    suggestions: suggestions.length > 0 ? suggestions : fallback.suggestions,
+    improvements: improvements.length > 0 ? improvements : suggestions,
+    phonemeErrors: normalizeAnalysisItems(parsed.phonemeErrors, fallback.phonemeErrors),
     spokenText,
   };
 }
@@ -130,8 +269,92 @@ function buildSpeechModelCandidates(...models: Array<string | undefined>) {
       .flatMap((model) => (model ? [model] : []))
       .concat(DEFAULT_SPEECH_MODELS)
       .map((model) => model.trim())
+      .filter((model) => !UNSUPPORTED_SPEECH_MODELS.has(model))
       .filter(Boolean),
   )];
+}
+
+function readProviderErrorBody(body: unknown) {
+  if (typeof body === "string") {
+    return body;
+  }
+
+  if (body && typeof body === "object") {
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return String(body);
+    }
+  }
+
+  return "";
+}
+
+function normalizeProviderMappings(input: unknown): ProviderMappingEntry[] {
+  if (!input) {
+    return [];
+  }
+
+  if (Array.isArray(input)) {
+    return input as ProviderMappingEntry[];
+  }
+
+  if (typeof input === "object") {
+    return Object.entries(input as Record<string, any>)
+      .map(([provider, value]) => ({
+        provider,
+        providerId: value?.providerId || value?.modelId || value?.id || "",
+        hfModelId: value?.hfModelId,
+        task: value?.task,
+        status: value?.status,
+      }))
+      .filter((entry) => entry.providerId);
+  }
+
+  return [];
+}
+
+async function fetchInferenceProviderMappings(model: string, token: string) {
+  const cached = speechProviderMappingCache.get(model);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.mappings;
+  }
+
+  try {
+    const response = await axios.get(`https://huggingface.co/api/models/${model}`, {
+      adapter: "http",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      params: {
+        "expand[]": "inferenceProviderMapping",
+      },
+      timeout: 30_000,
+    });
+
+    const mappings = normalizeProviderMappings(response.data?.inferenceProviderMapping);
+    speechProviderMappingCache.set(model, {
+      mappings,
+      expiresAt: Date.now() + 5 * 60_000,
+    });
+    return mappings;
+  } catch (error) {
+    console.error(`[hf-asr] failed to fetch provider mapping for ${model}:`, error);
+    return [];
+  }
+}
+
+function selectSpeechMappings(mappings: ProviderMappingEntry[]) {
+  const supportedProviders = ["hf-inference", "replicate", "fal-ai"];
+
+  return mappings
+    .filter((entry) => entry.task === "automatic-speech-recognition" && entry.status !== "staging")
+    .sort((left, right) => {
+      const leftIndex = supportedProviders.indexOf(left.provider);
+      const rightIndex = supportedProviders.indexOf(right.provider);
+      return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
+    });
 }
 
 function parseSpeechResponse(raw: string) {
@@ -152,43 +375,266 @@ function parseSpeechResponse(raw: string) {
   return null;
 }
 
-async function transcribeAudioWithHf(file: File, spokenTextHint?: string) {
-  const settings = await getHfSettings();
-  if (!settings.apiToken) {
-    return spokenTextHint?.trim() || null;
+function buildAudioDataUrl(file: File, bytes: Uint8Array) {
+  return `data:${file.type || "audio/webm"};base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+async function requestHfInferenceAsr(
+  mapping: ProviderMappingEntry,
+  token: string,
+  file: File,
+  bytes: Uint8Array,
+): Promise<SpeechRequestResult> {
+  try {
+    const response = await axios.post(
+      `https://router.huggingface.co/hf-inference/models/${mapping.providerId}`,
+      bytes,
+      {
+        adapter: "http",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": file.type || "audio/webm",
+        },
+        timeout: 120_000,
+      },
+    );
+
+    const raw = typeof response.data === "string"
+      ? response.data
+      : JSON.stringify(response.data || {});
+    const parsed = parseSpeechResponse(raw);
+    if (parsed) {
+      return { ok: true, text: parsed, provider: mapping.provider };
+    }
+
+    return {
+      ok: false,
+      status: response.status,
+      message: "Malformed hf-inference ASR response",
+      provider: mapping.provider,
+    };
+  } catch (error) {
+    const axiosError = error as any;
+    return {
+      ok: false,
+      status: axiosError?.response?.status || 500,
+      message: [
+        axiosError?.message,
+        readProviderErrorBody(axiosError?.response?.data),
+      ].filter(Boolean).join(" ").trim() || "hf-inference ASR request failed",
+      provider: mapping.provider,
+    };
+  }
+}
+
+async function requestReplicateAsr(
+  mapping: ProviderMappingEntry,
+  token: string,
+  file: File,
+  bytes: Uint8Array,
+): Promise<SpeechRequestResult> {
+  try {
+    const usesVersionRoute = mapping.providerId.includes(":");
+    const url = usesVersionRoute
+      ? "https://router.huggingface.co/replicate/v1/predictions"
+      : `https://router.huggingface.co/replicate/v1/models/${mapping.providerId}/predictions`;
+
+    const response = await axios.post(
+      url,
+      {
+        input: {
+          audio: buildAudioDataUrl(file, bytes),
+        },
+        version: usesVersionRoute ? mapping.providerId.split(":")[1] : undefined,
+      },
+      {
+        adapter: "http",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          Prefer: "wait",
+          "Content-Type": "application/json",
+        },
+        timeout: 120_000,
+      },
+    );
+
+    const output = response.data?.output;
+    if (typeof output === "string") {
+      return { ok: true, text: output.trim(), provider: mapping.provider };
+    }
+    if (Array.isArray(output) && typeof output[0] === "string") {
+      return { ok: true, text: output[0].trim(), provider: mapping.provider };
+    }
+    if (typeof output?.transcription === "string") {
+      return { ok: true, text: output.transcription.trim(), provider: mapping.provider };
+    }
+    if (typeof output?.translation === "string") {
+      return { ok: true, text: output.translation.trim(), provider: mapping.provider };
+    }
+
+    return {
+      ok: false,
+      status: response.status,
+      message: "Malformed replicate ASR response",
+      provider: mapping.provider,
+    };
+  } catch (error) {
+    const axiosError = error as any;
+    return {
+      ok: false,
+      status: axiosError?.response?.status || 500,
+      message: [
+        axiosError?.message,
+        readProviderErrorBody(axiosError?.response?.data),
+      ].filter(Boolean).join(" ").trim() || "replicate ASR request failed",
+      provider: mapping.provider,
+    };
+  }
+}
+
+async function requestFalAiAsr(
+  mapping: ProviderMappingEntry,
+  token: string,
+  file: File,
+  bytes: Uint8Array,
+): Promise<SpeechRequestResult> {
+  const contentType = file.type || "audio/webm";
+  if (!SUPPORTED_FAL_AUDIO_TYPES.includes(contentType)) {
+    return {
+      ok: false,
+      status: 415,
+      message: `fal-ai does not support ${contentType}`,
+      provider: mapping.provider,
+    };
   }
 
-  const payload = await file.arrayBuffer();
-  const contentType = file.type || "audio/webm";
+  try {
+    const response = await axios.post(
+      `https://router.huggingface.co/fal-ai/${mapping.providerId}`,
+      {
+        audio_url: buildAudioDataUrl(file, bytes),
+      },
+      {
+        adapter: "http",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 120_000,
+      },
+    );
+
+    if (typeof response.data?.text === "string") {
+      return { ok: true, text: response.data.text.trim(), provider: mapping.provider };
+    }
+
+    return {
+      ok: false,
+      status: response.status,
+      message: "Malformed fal-ai ASR response",
+      provider: mapping.provider,
+    };
+  } catch (error) {
+    const axiosError = error as any;
+    return {
+      ok: false,
+      status: axiosError?.response?.status || 500,
+      message: [
+        axiosError?.message,
+        readProviderErrorBody(axiosError?.response?.data),
+      ].filter(Boolean).join(" ").trim() || "fal-ai ASR request failed",
+      provider: mapping.provider,
+    };
+  }
+}
+
+async function requestSpeechFromMapping(
+  mapping: ProviderMappingEntry,
+  token: string,
+  file: File,
+  bytes: Uint8Array,
+) {
+  if (mapping.provider === "hf-inference") {
+    return requestHfInferenceAsr(mapping, token, file, bytes);
+  }
+
+  if (mapping.provider === "replicate") {
+    return requestReplicateAsr(mapping, token, file, bytes);
+  }
+
+  if (mapping.provider === "fal-ai") {
+    return requestFalAiAsr(mapping, token, file, bytes);
+  }
+
+  return {
+    ok: false,
+    status: 501,
+    message: `Unsupported ASR provider: ${mapping.provider}`,
+    provider: mapping.provider,
+  } satisfies SpeechRequestResult;
+}
+
+async function transcribeAudioWithHf(file: File, spokenTextHint?: string): Promise<SpeechTranscription> {
+  const settings = await getHfSettings();
+  if (!settings.apiToken) {
+    return {
+      text: spokenTextHint?.trim() || "",
+      model: null,
+      provider: null,
+      attempts: [],
+      usedHint: Boolean(spokenTextHint?.trim()),
+    };
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
   const models = buildSpeechModelCandidates(settings.speechModel, config.huggingface.speechModel);
+  const attempts: SpeechAttempt[] = [];
 
   for (const model of models) {
-    try {
-      const response = await fetch(`https://router.huggingface.co/hf-inference/models/${model}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${settings.apiToken}`,
-          "Content-Type": contentType,
-        },
-        body: payload,
+    const mappings = selectSpeechMappings(await fetchInferenceProviderMappings(model, settings.apiToken));
+    if (mappings.length === 0) {
+      attempts.push({
+        model,
+        provider: "router",
+        status: 404,
+        message: "No supported automatic-speech-recognition provider mapping found",
       });
+      continue;
+    }
 
-      const raw = await response.text();
-      if (!response.ok) {
-        console.error("[hf-asr] error from %s: %d %s", model, response.status, raw.slice(0, 300));
-        continue;
+    for (const mapping of mappings) {
+      const result = await requestSpeechFromMapping(mapping, settings.apiToken, file, bytes);
+      if (result.ok && result.text) {
+        return {
+          text: result.text,
+          model,
+          provider: mapping.provider,
+          attempts,
+          usedHint: false,
+        };
       }
 
-      const parsed = parseSpeechResponse(raw);
-      if (parsed) {
-        return parsed;
-      }
-    } catch (error) {
-      console.error("[hf-asr] transcription failed:", error);
+      attempts.push({
+        model,
+        provider: mapping.provider,
+        status: result.status,
+        message: result.message,
+      });
+      console.error("[hf-asr] error from %s@%s: %d %s", model, mapping.provider, result.status, result.message.slice(0, 300));
     }
   }
 
-  return spokenTextHint?.trim() || null;
+  const hint = spokenTextHint?.trim() || "";
+  return {
+    text: hint,
+    model: null,
+    provider: null,
+    attempts,
+    usedHint: Boolean(hint),
+  };
 }
 
 export const aiRoutes = new Elysia({ prefix: "/ai" })
@@ -371,8 +817,9 @@ Choose an interesting, useful everyday English word.`;
 
   // Analyze pronunciation recording
   .post("/analyze-pronunciation", async ({ headers, body, jwt, set }) => {
-    const user = await getUser(headers, jwt, set);
+    await getUser(headers, jwt, set);
     const { word, transcription } = body;
+    return buildPronunciationAnalysis(word, transcription, body.correctIpa);
 
     const systemPrompt = `You are an English pronunciation coach analyzing a learner's pronunciation attempt.
 Return ONLY valid JSON:
@@ -419,6 +866,16 @@ Analyze their pronunciation accuracy (score 0-100) and provide constructive feed
       set.status = 400;
       return { error: "file and targetText are required" };
     }
+
+    const transcription = await transcribeAudioWithHf(file, spokenTextHint);
+    const analysis = await buildPronunciationAnalysis(targetText, transcription.text, targetIpa);
+    return {
+      ...analysis,
+      transcriptionModel: transcription.model,
+      transcriptionProvider: transcription.provider,
+      transcriptionUsedHint: transcription.usedHint,
+      transcriptionAttempts: transcription.attempts,
+    };
 
     const spokenText = (await transcribeAudioWithHf(file, spokenTextHint)) || "";
     return buildFallbackPronunciationAnalysis(targetText, spokenText, targetIpa);

@@ -67,7 +67,7 @@ export const config = {
   huggingface: {
     apiToken: process.env.HF_API_TOKEN || "",
     ttsModel: process.env.HF_TTS_MODEL || "hexgrad/Kokoro-82M",
-    speechModel: process.env.HF_SPEECH_MODEL || "openai/whisper-small",
+    speechModel: process.env.HF_SPEECH_MODEL || "openai/whisper-large-v3",
   },
   uploadsDir: process.env.UPLOADS_DIR || "./uploads",
   frontendUrl: process.env.FRONTEND_URL || defaultFrontendUrl,

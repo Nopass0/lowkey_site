@@ -464,8 +464,9 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     const user = await getUser(headers, jwt, set);
     const { topic, count = 10, level = "intermediate", deckId } = body as any;
 
-    const systemPrompt = `You are an English teacher creating high-quality flashcards for Russian learners. Return ONLY valid JSON array.`;
-    const prompt = `Create ${count} English vocabulary flashcards on the topic: "${topic}".
+    try {
+      const systemPrompt = `You are an English teacher creating high-quality flashcards for Russian learners. Return ONLY valid JSON array.`;
+      const prompt = `Create ${count} English vocabulary flashcards on the topic: "${topic}".
 Level: ${level}.
 
 Return JSON array:
@@ -482,44 +483,71 @@ Return JSON array:
 ]
 Make cards varied - include nouns, verbs, phrases, idioms related to the topic. Ensure IPA pronunciation is correct.`;
 
-    const aiResponse = await callOpenRouter(prompt, systemPrompt, { maxTokens: 3000, temperature: 0.7 });
-    if (!aiResponse) {
-      set.status = 503;
-      return { error: "AI not configured" };
+      const aiResponse = await callOpenRouter(prompt, systemPrompt, { maxTokens: 3000, temperature: 0.7 });
+      if (!aiResponse) {
+        set.status = 503;
+        return { error: "AI not configured" };
+      }
+
+      const cards = parseJsonFromAi<any[]>(aiResponse, []);
+      const normalizedCards = cards
+        .filter((card) => card && typeof card === "object")
+        .map((card) => ({
+          front: typeof card.front === "string" ? card.front.trim() : "",
+          back: typeof card.back === "string" ? card.back.trim() : "",
+          subtitle: typeof card.subtitle === "string" ? card.subtitle.trim() : null,
+          footnote: typeof card.footnote === "string" ? card.footnote.trim() : null,
+          pronunciation: typeof card.pronunciation === "string" ? card.pronunciation.trim() : "",
+          examples: Array.isArray(card.examples)
+            ? card.examples.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+            : [],
+          tags: Array.isArray(card.tags)
+            ? card.tags.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+            : [topic],
+        }))
+        .filter((card) => card.front && card.back)
+        .slice(0, count);
+
+      if (normalizedCards.length === 0) {
+        set.status = 502;
+        return { error: "AI returned no valid flashcards" };
+      }
+
+      const created = [];
+      for (const c of normalizedCards) {
+        const card = await db.create("EnglishCards", {
+          userId: user.id,
+          deckId: deckId || null,
+          front: c.front,
+          back: c.back,
+          subtitle: c.subtitle,
+          footnote: c.footnote,
+          pronunciation: c.pronunciation,
+          examples: c.examples,
+          tags: c.tags,
+          aiGenerated: true,
+          easeFactor: 2.5,
+          interval: 1,
+          repetitions: 0,
+          reviewCount: 0,
+          correctCount: 0,
+          status: "new",
+          nextReview: new Date().toISOString(),
+        });
+        created.push(card);
+      }
+
+      if (deckId && created.length > 0) {
+        const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", deckId)]);
+        if (deck) await db.update("EnglishDecks", deckId, { cardCount: (deck.cardCount || 0) + created.length });
+      }
+
+      return { cards: created, count: created.length };
+    } catch (error) {
+      console.error("[cards] generate-by-topic failed:", error);
+      set.status = 500;
+      return { error: "Failed to generate flashcards" };
     }
-
-    const cards = parseJsonFromAi<any[]>(aiResponse, []);
-
-    const created = [];
-    for (const c of cards.slice(0, count)) {
-      const card = await db.create("EnglishCards", {
-        userId: user.id,
-        deckId: deckId || null,
-        front: c.front,
-        back: c.back,
-        subtitle: c.subtitle || null,
-        footnote: c.footnote || null,
-        pronunciation: c.pronunciation || "",
-        examples: c.examples || [],
-        tags: c.tags || [topic],
-        aiGenerated: true,
-        easeFactor: 2.5,
-        interval: 1,
-        repetitions: 0,
-        reviewCount: 0,
-        correctCount: 0,
-        status: "new",
-        nextReview: new Date().toISOString(),
-      });
-      created.push(card);
-    }
-
-    if (deckId && created.length > 0) {
-      const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", deckId)]);
-      if (deck) await db.update("EnglishDecks", deckId, { cardCount: (deck.cardCount || 0) + created.length });
-    }
-
-    return { cards: created, count: created.length };
   }, {
     body: t.Object({
       topic: t.String(),
