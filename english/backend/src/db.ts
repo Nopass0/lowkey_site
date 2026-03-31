@@ -1,4 +1,5 @@
 import { VoidClient, query } from "@voiddb/orm";
+import { nanoid } from "nanoid";
 import { config } from "./config";
 
 type VoidRow = {
@@ -22,12 +23,13 @@ function mapField(field: string) {
   return field === "id" ? "_id" : field;
 }
 
-function normalizeInput(data: Record<string, any>) {
+function normalizeInput(data: Record<string, any>, ensureId = false) {
   const { id, _id, ...rest } = data;
   const next = { ...rest } as Record<string, any>;
-  const resolvedId = _id || id;
+  const resolvedId = _id || id || (ensureId ? nanoid() : undefined);
 
   if (resolvedId) {
+    next.id = resolvedId;
     next._id = resolvedId;
   }
 
@@ -39,10 +41,11 @@ function normalizeRow<T extends Record<string, any> | null>(row: T) {
     return null;
   }
 
-  const { _id, ...rest } = row;
+  const resolvedId = row._id || row.id;
+  const { _id, id, ...rest } = row;
   return {
-    id: _id,
-    _id,
+    id: resolvedId,
+    _id: resolvedId,
     ...rest,
   };
 }
@@ -119,7 +122,7 @@ async function getCollection(name: string) {
 export const db = {
   async create(collection: string, data: Record<string, any>) {
     const handle = await getCollection(collection);
-    const id = await handle.insert(normalizeInput(data));
+    const id = await handle.insert(normalizeInput(data, true));
     return normalizeRow(await handle.findById(id));
   },
 
