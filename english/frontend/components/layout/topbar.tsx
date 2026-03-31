@@ -6,6 +6,7 @@ import {
   Flame, Zap, Target
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { useCardsStore } from "@/store/cards";
 import { useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -27,7 +28,7 @@ const PAGE_TITLES: Record<string, { title: string; sub?: string }> = {
   "/admin":        { title: "Администрирование", sub: "Управление платформой" },
 };
 
-type ActionItem = { label: string; href: string; icon: React.ElementType; accent?: string };
+type ActionItem = { label: string; href: string; icon: React.ElementType; accent?: string; bg?: string };
 
 const PAGE_ACTIONS: Record<string, ActionItem[]> = {
   "/dashboard": [
@@ -77,7 +78,30 @@ export function Topbar({ title }: { title?: string }) {
   const [searchQuery, setSearchQuery] = useState("");
 
   const pageInfo = PAGE_TITLES[pathname] || { title: title || "" };
-  const actions = PAGE_ACTIONS[pathname] || [];
+  const { dueCards } = useCardsStore();
+  
+  const actions: ActionItem[] = [...(PAGE_ACTIONS[pathname] || [])];
+  
+  if (pathname !== "/study" && dueCards.length > 0) {
+    if (!actions.some(a => a.href === "/study")) {
+      actions.unshift({
+        label: `Повторить ${dueCards.length}`,
+        href: "/study",
+        icon: Flame,
+        accent: "text-orange-500",
+        bg: "bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400"
+      });
+    } else {
+      const idx = actions.findIndex(a => a.href === "/study");
+      actions[idx] = {
+        label: `Повторить ${dueCards.length}`,
+        href: "/study",
+        icon: Flame,
+        accent: "text-orange-500",
+        bg: "bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400"
+      };
+    }
+  }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,8 +153,8 @@ export function Topbar({ title }: { title?: string }) {
                     whileTap={{ scale: 0.96 }}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium",
-                      "bg-accent/70 hover:bg-accent text-muted-foreground hover:text-foreground",
-                      "transition-colors duration-150 cursor-pointer whitespace-nowrap border border-transparent hover:border-border/40"
+                      action.bg || "bg-accent/70 hover:bg-accent text-muted-foreground hover:text-foreground border border-transparent hover:border-border/40",
+                      "transition-colors duration-150 cursor-pointer whitespace-nowrap"
                     )}
                   >
                     <Icon size={11} className={action.accent || "text-muted-foreground"} />

@@ -2,6 +2,7 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
+import { callOpenRouter, parseJsonFromAi } from "./openrouter";
 import { getAiSettings } from "./settings";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
@@ -14,44 +15,7 @@ async function getUser(headers: any, jwtInstance: any, set: any) {
   return user;
 }
 
-async function callOpenRouter(prompt: string, systemPrompt: string) {
-  const settings = await getAiSettings();
-  if (!settings.apiKey || !settings.model) {
-    return null;
-  }
-
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: settings.maxTokens,
-        temperature: settings.temperature,
-      }),
-    });
-
-    if (!res.ok) {
-      const details = await res.text().catch(() => "");
-      throw new Error(`OpenRouter error: ${res.status} ${details.slice(0, 400)}`);
-    }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch (error) {
-    console.error("[openrouter]", error);
-    return null;
-  }
-}
+// callOpenRouter is now imported from ./openrouter
 
 function fallbackCardGeneration(word: string) {
   return {
@@ -90,12 +54,7 @@ Include 2 example sentences, IPA pronunciation, and relevant tags (e.g., noun, v
 
     let cardData;
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        cardData = jsonMatch ? JSON.parse(jsonMatch[0]) : fallbackCardGeneration(word);
-      } catch {
-        cardData = fallbackCardGeneration(word);
-      }
+      cardData = parseJsonFromAi(aiResponse, fallbackCardGeneration(word));
     } else {
       cardData = fallbackCardGeneration(word);
     }
@@ -128,12 +87,7 @@ Return ONLY valid JSON array:
 
     let cards = [];
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
-        cards = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-      } catch {
-        cards = [];
-      }
+      cards = parseJsonFromAi<any[]>(aiResponse, []);
     }
 
     return { cards: cards.map((c: any) => ({ ...c, aiGenerated: true })) };
@@ -171,12 +125,7 @@ Choose an interesting, useful everyday English word.`;
 
     let gameData;
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        gameData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      } catch {
-        gameData = null;
-      }
+      gameData = parseJsonFromAi(aiResponse, null);
     }
 
     if (!gameData) {
@@ -221,10 +170,8 @@ Analyze their pronunciation accuracy (score 0-100) and provide constructive feed
     let analysis = { score: 70, feedback: "Хорошая попытка! Продолжайте практиковаться.", corrections: [], tips: ["Слушайте носителей языка", "Практикуйтесь каждый день"], phonemes: [] };
 
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) analysis = JSON.parse(jsonMatch[0]);
-      } catch {}
+      const parsed = parseJsonFromAi(aiResponse, null);
+      if (parsed) analysis = parsed;
     }
 
     return analysis;
@@ -280,10 +227,8 @@ Provide explanations in Russian. Keep strengths/improvements in Russian.`;
     };
 
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) result = { ...result, ...JSON.parse(jsonMatch[0]) };
-      } catch {}
+      const parsed = parseJsonFromAi(aiResponse, null);
+      if (parsed) result = { ...result, ...parsed };
     }
 
     return result;

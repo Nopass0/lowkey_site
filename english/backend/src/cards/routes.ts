@@ -4,6 +4,9 @@ import { db } from "../db";
 import { config } from "../config";
 import { sm2, getDueCards, getCardStatus, calculateXp } from "./spaced-repetition";
 
+declare const Bun: any;
+declare const Buffer: any;
+
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
   if (!token) { set.status = 401; throw new Error("Unauthorized"); }
@@ -52,7 +55,7 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     ]);
     if (!deck) { set.status = 404; return { error: "Not found" }; }
     return db.update("EnglishDecks", params.id, body);
-  }, { body: t.Object({ name: t.Optional(t.String()), description: t.Optional(t.String()), emoji: t.Optional(t.String()), color: t.Optional(t.String()), isPublic: t.Optional(t.Boolean()) }) })
+  }, { body: t.Object({ name: t.Optional(t.String()), description: t.Optional(t.String()), emoji: t.Optional(t.String()), color: t.Optional(t.String()), isPublic: t.Optional(t.Boolean()), imageUrl: t.Optional(t.String()) }) })
   .delete("/decks/:id", async ({ headers, params, jwt, set }) => {
     const user = await getUser(headers, jwt, set);
     const deck = await db.findOne("EnglishDecks", [
@@ -62,9 +65,66 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     if (!deck) { set.status = 404; return { error: "Not found" }; }
     await db.delete("EnglishDecks", params.id);
     // Delete all cards in deck
-    const cards = await db.findMany("EnglishCards", [db.filter.eq("deckId", params.id)]);
-    for (const card of cards) await db.delete("EnglishCards", card.id);
+    const cards = await db.findMany("EnglishCards", { filters: [db.filter.eq("deckId", params.id)] });
+    for (const card of cards || []) {
+      if (card?.id) await db.delete("EnglishCards", card.id);
+    }
     return { success: true };
+  })
+
+  // === PUBLIC DECKS ===
+  .get("/decks/public", async ({ headers, jwt, set }) => {
+    await getUser(headers, jwt, set);
+    const decks = await db.findMany("EnglishDecks", {
+      filters: [db.filter.eq("isPublic", true)],
+      sort: [{ field: "createdAt", direction: "desc" }],
+    });
+    return decks;
+  })
+  .post("/decks/:id/adopt", async ({ headers, params, jwt, set }) => {
+    const user = await getUser(headers, jwt, set);
+    const deckToClone = await db.findOne("EnglishDecks", [db.filter.eq("id", params.id)]);
+    if (!deckToClone || !deckToClone.isPublic) { set.status = 404; return { error: "Not found or not public" }; }
+    
+    // clone deck
+    const newDeck = await db.create("EnglishDecks", {
+      userId: user.id,
+      name: `${deckToClone.name} (Копия)`,
+      description: deckToClone.description,
+      emoji: deckToClone.emoji,
+      color: deckToClone.color,
+      isPublic: false,
+      cardCount: deckToClone.cardCount,
+      category: deckToClone.category,
+      imageUrl: deckToClone.imageUrl,
+    });
+    
+    if (!newDeck) { set.status = 500; return { error: "Failed to create deck" }; }
+    
+    // clone cards
+    const cards = await db.findMany("EnglishCards", { filters: [db.filter.eq("deckId", deckToClone.id)] });
+    for (const card of cards || []) {
+      if (!card) continue;
+      await db.create("EnglishCards", {
+        userId: user.id,
+        deckId: newDeck.id,
+        front: card.front,
+        back: card.back,
+        subtitle: card.subtitle,
+        footnote: card.footnote,
+        pronunciation: card.pronunciation,
+        audioUrl: card.audioUrl,
+        imageUrl: card.imageUrl,
+        examples: card.examples,
+        tags: card.tags,
+        easeFactor: 2.5,
+        interval: 1,
+        repetitions: 0,
+        status: "new",
+        nextReview: new Date().toISOString(),
+      });
+    }
+    return newDeck;
   })
 
   // === DECK IMAGE UPLOAD ===
@@ -138,6 +198,8 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     body: t.Object({
       front: t.String(),
       back: t.String(),
+      subtitle: t.Optional(t.String()),
+      footnote: t.Optional(t.String()),
       deckId: t.Optional(t.String()),
       pronunciation: t.Optional(t.String()),
       examples: t.Optional(t.Array(t.String())),
@@ -158,10 +220,14 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     body: t.Object({
       front: t.Optional(t.String()),
       back: t.Optional(t.String()),
+      subtitle: t.Optional(t.String()),
+      footnote: t.Optional(t.String()),
       deckId: t.Optional(t.String()),
       pronunciation: t.Optional(t.String()),
       examples: t.Optional(t.Array(t.String())),
       tags: t.Optional(t.Array(t.String())),
+      imageUrl: t.Optional(t.String()),
+      audioUrl: t.Optional(t.String()),
     }),
   })
   .delete("/:id", async ({ headers, params, jwt, set }) => {
@@ -369,6 +435,8 @@ Return JSON array:
   {
     "front": "English word or phrase",
     "back": "Перевод на русском",
+    "subtitle": "Part of speech or literally translation (optional)",
+    "footnote": "Usage note or mnemonic (optional)",
     "pronunciation": "/IPA/",
     "examples": ["English example 1.", "English example 2."],
     "tags": ["topic", "partOfSpeech"]
@@ -411,6 +479,8 @@ Make cards varied - include nouns, verbs, phrases, idioms related to the topic. 
         deckId: deckId || null,
         front: c.front,
         back: c.back,
+        subtitle: c.subtitle || null,
+        footnote: c.footnote || null,
         pronunciation: c.pronunciation || "",
         examples: c.examples || [],
         tags: c.tags || [topic],

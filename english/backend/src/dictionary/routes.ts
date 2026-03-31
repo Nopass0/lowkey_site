@@ -2,7 +2,7 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
-import { getAiSettings } from "../ai/settings";
+import { callOpenRouter, parseJsonFromAi } from "../ai/openrouter";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -14,33 +14,7 @@ async function getUser(headers: any, jwtInstance: any, set: any) {
   return user;
 }
 
-async function callOpenRouter(prompt: string, systemPrompt: string) {
-  const settings = await getAiSettings();
-  if (!settings.apiKey || !settings.model) return null;
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 2000,
-        temperature: 0.3,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch { return null; }
-}
+// callOpenRouter is now imported from ../ai/openrouter
 
 // Fetch from Free Dictionary API
 async function fetchFromFreeDictionary(word: string) {
@@ -94,7 +68,15 @@ async function fetchFromFreeDictionary(word: string) {
 }
 
 // Enrich with AI (Russian translation, advanced examples)
-async function enrichWithAI(word: string, freeApiData: any) {
+type AiEnrichment = {
+  russianTranslations?: string[];
+  enrichedExamples?: { en: string; ru: string }[];
+  collocations?: string[];
+  register?: string;
+  usageNote?: string;
+};
+
+async function enrichWithAI(word: string, freeApiData: any): Promise<AiEnrichment | null> {
   const systemPrompt = `You are an English-Russian dictionary. Return ONLY valid JSON with Russian translations and usage context.`;
   const prompt = `For the English word "${word}", provide:
 1. Russian translation(s) (most common first)
@@ -117,11 +99,7 @@ Return JSON:
 
   const response = await callOpenRouter(prompt, systemPrompt);
   if (!response) return null;
-
-  try {
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-  } catch { return null; }
+  return parseJsonFromAi(response, null);
 }
 
 export const dictionaryRoutes = new Elysia({ prefix: "/dictionary" })

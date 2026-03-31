@@ -2,6 +2,7 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
+import { callOpenRouter, parseJsonFromAi } from "../ai/openrouter";
 import { getAiSettings } from "../ai/settings";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
@@ -14,33 +15,7 @@ async function getUser(headers: any, jwtInstance: any, set: any) {
   return user;
 }
 
-async function callOpenRouter(prompt: string, systemPrompt: string) {
-  const settings = await getAiSettings();
-  if (!settings.apiKey || !settings.model) return null;
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: settings.maxTokens,
-        temperature: settings.temperature,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch { return null; }
-}
+// callOpenRouter is now imported from ../ai/openrouter
 
 const GRAMMAR_SEED = [
   {
@@ -235,10 +210,7 @@ Difficulty: 1=easy, 2=medium, 3=hard. Mix difficulties.`;
     let tests: any[] = [];
 
     if (aiResponse) {
-      try {
-        const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
-        tests = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-      } catch { tests = []; }
+      tests = parseJsonFromAi<any[]>(aiResponse, []);
     }
 
     if (tests.length === 0) {
@@ -311,5 +283,14 @@ Difficulty: 1=easy, 2=medium, 3=hard. Mix difficulties.`;
       : `Explain this English grammar structure: "${text}"`;
 
     const response = await callOpenRouter(prompt, systemPrompt);
-    return { explanation: response || "Объяснение недоступно. Проверьте настройки AI." };
+    if (response) {
+      return { explanation: response };
+    }
+
+    // Provide a specific error so the user/admin knows what to fix
+    const settings = await getAiSettings();
+    if (!settings.apiKey) {
+      return { explanation: "❌ API-ключ AI не настроен. Администратор должен указать OpenRouter API ключ в настройках админ-панели." };
+    }
+    return { explanation: "⚠️ AI-сервис временно недоступен. Попробуйте позже." };
   });

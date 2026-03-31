@@ -3,6 +3,7 @@ import { jwt } from "@elysiajs/jwt";
 import { db } from "../db";
 import { config } from "../config";
 import { getPublicAiSettings, saveAiSettings } from "../ai/settings";
+import { getPublicHfSettings, saveHfSettings } from "../ai/hf-settings";
 
 async function getAdmin(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -60,6 +61,23 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
       siteName: t.Optional(t.String()),
       temperature: t.Optional(t.Number()),
       maxTokens: t.Optional(t.Number()),
+    }),
+  })
+
+  .get("/hf-settings", async ({ headers, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    return getPublicHfSettings();
+  })
+
+  .patch("/hf-settings", async ({ headers, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    return saveHfSettings(body);
+  }, {
+    body: t.Object({
+      apiToken: t.Optional(t.String()),
+      clearApiToken: t.Optional(t.Boolean()),
+      ttsModel: t.Optional(t.String()),
+      speechModel: t.Optional(t.String()),
     }),
   })
 
@@ -146,6 +164,7 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
     });
     const byDay: Record<string, number> = {};
     for (const p of payments) {
+      if (!p || !p.createdAt) continue;
       const day = new Date(p.createdAt).toISOString().split("T")[0];
       byDay[day] = (byDay[day] || 0) + (p.amount || 0);
     }
@@ -170,6 +189,7 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
     if (!bot) { set.status = 503; return { error: "Bot not initialized" }; }
 
     for (const link of links) {
+      if (!link || !link.userId || !link.telegramId) continue;
       try {
         if (premiumOnly) {
           const user = await db.findOne("EnglishUsers", [db.filter.eq("id", link.userId)]);

@@ -44,6 +44,7 @@ database {
     description String?
     emoji String @default("📚")
     color String @default("#6366f1")
+    imageUrl String?
     isPublic Boolean @default(false)
     cardCount Int @default(0)
     category String @default("general")
@@ -58,6 +59,8 @@ database {
     deckId String?
     front String
     back String
+    subtitle String?
+    footnote String?
     pronunciation String?
     audioUrl String?
     imageUrl String?
@@ -313,9 +316,22 @@ database {
     siteName String?
     temperature Float @default(0.7)
     maxTokens Int @default(2048)
+    hfApiToken String?
+    ttsModel String?
+    speechModel String?
     createdAt DateTime @default(now())
     updatedAt DateTime @default(now()) @updatedAt
     @@map("EnglishSiteSettings")
+  }
+
+  model EnglishSoundCache {
+    id String @id @map("_id")
+    text String @unique
+    audio Blob?
+    audioUrl String?
+    model String
+    createdAt DateTime @default(now())
+    @@map("EnglishSoundCache")
   }
 
   model EnglishGroups {

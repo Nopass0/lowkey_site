@@ -151,6 +151,7 @@ export function Sidebar() {
         )}
       </nav>
 
+
       {/* Bottom section: Profile + plan */}
       <div className="px-3 pb-4 space-y-2 border-t pt-3" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
 

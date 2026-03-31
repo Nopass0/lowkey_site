@@ -11,8 +11,8 @@ export const metadata: Metadata = {
   description: "AI flashcards, grammar, pronunciation practice, and progress tracking for English learners.",
   keywords: ["english", "flashcards", "ai", "pronunciation", "lowkey english", "grammar"],
   icons: {
-    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
-    apple: [{ url: "/icon.svg" }],
+    icon: [{ url: "/icon.png", type: "image/png" }],
+    apple: [{ url: "/icon.png" }],
   },
 };
 

@@ -1,6 +1,7 @@
 import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import bcrypt from "bcryptjs";
+import sharp from "sharp";
 import { db } from "../db";
 import { config } from "../config";
 
@@ -156,8 +157,26 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       if (!allowed.includes(ext)) { set.status = 400; return { error: "Invalid file type" }; }
       if (file.size > 5 * 1024 * 1024) { set.status = 400; return { error: "File too large (max 5MB)" }; }
 
-      const filename = `${userId}.${ext}`;
       const buf = await file.arrayBuffer();
+      let finalBuffer = Buffer.from(buf);
+      let finalType = file.type || `image/${ext}`;
+      let finalExt = ext;
+
+      // Optimize images (except animated GIFs)
+      if (ext !== "gif") {
+        try {
+          finalBuffer = await sharp(finalBuffer)
+            .resize({ width: 256, height: 256, fit: "cover" })
+            .webp({ quality: 85 })
+            .toBuffer();
+          finalType = "image/webp";
+          finalExt = "webp";
+        } catch (error) {
+          console.error("[avatar] failed to optimize image", error);
+        }
+      }
+
+      const filename = `${userId}.${finalExt}`;
 
       try {
         await db.deleteFile("EnglishUsers", userId, "avatar");
@@ -165,9 +184,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         // Ignore missing previous blob.
       }
 
-      const avatarRef = await db.uploadFile("EnglishUsers", userId, "avatar", buf, {
+      const avatarRef = await db.uploadFile("EnglishUsers", userId, "avatar", finalBuffer as any, {
         filename,
-        contentType: file.type || `image/${ext}`,
+        contentType: finalType,
       });
       const avatarUrl = await db.blobUrl("EnglishUsers", avatarRef);
       const updated = await db.update("EnglishUsers", userId, { avatarUrl });

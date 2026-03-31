@@ -21,6 +21,8 @@ export interface Card {
   deckId?: string;
   front: string;
   back: string;
+  subtitle?: string;
+  footnote?: string;
   pronunciation?: string;
   audioUrl?: string;
   imageUrl?: string;
@@ -41,16 +43,19 @@ export interface Card {
 
 interface CardsStore {
   decks: Deck[];
+  publicDecks: Deck[];
   cards: Card[];
   dueCards: Card[];
   currentSession: any | null;
   isLoading: boolean;
   fetchDecks: () => Promise<void>;
+  fetchPublicDecks: () => Promise<void>;
   fetchCards: (params?: any) => Promise<void>;
   fetchDueCards: (params?: any) => Promise<void>;
   createDeck: (data: any) => Promise<Deck>;
   updateDeck: (id: string, data: any) => Promise<void>;
   deleteDeck: (id: string) => Promise<void>;
+  adoptDeck: (id: string) => Promise<Deck>;
   createCard: (data: any) => Promise<Card>;
   updateCard: (id: string, data: any) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
@@ -61,6 +66,7 @@ interface CardsStore {
 
 export const useCardsStore = create<CardsStore>((set, get) => ({
   decks: [],
+  publicDecks: [],
   cards: [],
   dueCards: [],
   currentSession: null,
@@ -69,6 +75,11 @@ export const useCardsStore = create<CardsStore>((set, get) => ({
   fetchDecks: async () => {
     const decks = await cardsApi.getDecks();
     set({ decks });
+  },
+
+  fetchPublicDecks: async () => {
+    const publicDecks = await cardsApi.getPublicDecks();
+    set({ publicDecks });
   },
 
   fetchCards: async (params) => {
@@ -86,6 +97,12 @@ export const useCardsStore = create<CardsStore>((set, get) => ({
     const deck = await cardsApi.createDeck(data);
     set((s) => ({ decks: [...s.decks, deck] }));
     return deck;
+  },
+
+  adoptDeck: async (id) => {
+    const newDeck = await cardsApi.adoptDeck(id);
+    set((s) => ({ decks: [...s.decks, newDeck] }));
+    return newDeck;
   },
 
   updateDeck: async (id, data) => {

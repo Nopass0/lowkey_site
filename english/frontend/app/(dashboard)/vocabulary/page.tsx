@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Search, Trash2, Edit2, Wand2, Grid, List,
   X, Check, Sparkles, Volume2, BookOpen, Loader2,
-  Copy, Play, FolderPlus, Upload
+  Copy, Play, FolderPlus, Upload, Library, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCardsStore } from "@/store/cards";
+import { useAuthStore } from "@/store/auth";
 import { aiApi, cardsApi } from "@/api/client";
 import { getCardStatusLabel, getNextReviewText, cn } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -161,8 +162,8 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2">
               <span className="font-semibold text-sm">{card.front}</span>
-              {(card as any).frontSubtitle && (
-                <span className="text-xs text-muted-foreground">— {(card as any).frontSubtitle}</span>
+              {card.subtitle && (
+                <span className="text-xs text-muted-foreground">— {card.subtitle}</span>
               )}
               {card.pronunciation && (
                 <span className="text-xs text-muted-foreground font-mono">{card.pronunciation}</span>
@@ -170,8 +171,8 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
             </div>
             <div className="text-sm text-muted-foreground truncate">
               {card.back}
-              {(card as any).backSubtitle && (
-                <span className="text-xs ml-2 opacity-60">({(card as any).backSubtitle})</span>
+              {card.footnote && (
+                <span className="text-xs ml-2 opacity-60">({card.footnote})</span>
               )}
             </div>
           </div>
@@ -218,8 +219,8 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
               <div className="flex items-start justify-between">
                 <div>
                   <div className="font-bold text-base leading-tight">{card.front}</div>
-                  {(card as any).frontSubtitle && (
-                    <div className="text-[11px] text-primary/70 mt-0.5">{(card as any).frontSubtitle}</div>
+                  {card.subtitle && (
+                    <div className="text-[11px] text-primary/70 mt-0.5">{card.subtitle}</div>
                   )}
                   {card.pronunciation && (
                     <div className="text-[11px] text-muted-foreground font-mono mt-0.5">{card.pronunciation}</div>
@@ -248,8 +249,8 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
           <div className="flip-card-back glass-card rounded-2xl p-4 flex flex-col justify-between bg-primary/5">
             <div>
               <div className="font-semibold text-sm text-foreground leading-relaxed">{card.back}</div>
-              {(card as any).backSubtitle && (
-                <div className="text-[11px] text-muted-foreground mt-1 italic">{(card as any).backSubtitle}</div>
+              {card.footnote && (
+                <div className="text-[11px] text-muted-foreground mt-1 italic">{card.footnote}</div>
               )}
             </div>
             {card.examples && (card.examples as string[]).length > 0 && (
@@ -272,21 +273,34 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
 
 // ——— Main Page ———
 export default function VocabularyPage() {
-  const { decks, cards, fetchDecks, fetchCards, createCard, updateCard, deleteCard, createDeck } = useCardsStore();
+  type CardDraft = {
+    front: string;
+    back: string;
+    subtitle: string;
+    footnote: string;
+    pronunciation: string;
+    examples: string[];
+    deckId: string;
+    imageUrl?: string;
+  };
+
+  const { user } = useAuthStore();
+  const { decks, publicDecks, cards, fetchDecks, fetchPublicDecks, fetchCards, createCard, updateCard, deleteCard, createDeck, adoptDeck } = useCardsStore();
   const [selectedDeck, setSelectedDeck] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showAddCard, setShowAddCard] = useState(false);
   const [showAddDeck, setShowAddDeck] = useState(false);
   const [showAIGen, setShowAIGen] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [aiWord, setAiWord] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [editCard, setEditCard] = useState<Card | null>(null);
-  const [newCard, setNewCard] = useState({
-    front: "", back: "", frontSubtitle: "", backSubtitle: "",
+  const [newCard, setNewCard] = useState<CardDraft>({
+    front: "", back: "", subtitle: "", footnote: "",
     pronunciation: "", examples: [""], deckId: ""
   });
-  const [newDeck, setNewDeck] = useState({ name: "", emoji: "📚", color: "#6366f1" });
+  const [newDeck, setNewDeck] = useState({ name: "", emoji: "📚", color: "#6366f1", isPublic: false });
 
   const [aiTopic, setAiTopic] = useState("");
   const [aiCount, setAiCount] = useState(10);
@@ -298,9 +312,11 @@ export default function VocabularyPage() {
   const deckImgRef = useRef<HTMLInputElement>(null);
   const [uploadingCardId, setUploadingCardId] = useState<string | null>(null);
   const [uploadingDeckId, setUploadingDeckId] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState<string | null>(null);
 
   useEffect(() => { fetchDecks(); }, []);
   useEffect(() => { fetchCards(selectedDeck ? { deckId: selectedDeck } : {}); }, [selectedDeck]);
+  useEffect(() => { if (showTemplates) fetchPublicDecks(); }, [showTemplates]);
 
   const filteredCards = cards.filter((c) =>
     !search || c.front.toLowerCase().includes(search.toLowerCase()) || c.back.toLowerCase().includes(search.toLowerCase())
@@ -312,7 +328,7 @@ export default function VocabularyPage() {
     try {
       const data = await aiApi.generateCard({ word: aiWord.trim() });
       setNewCard({
-        front: data.front, back: data.back, frontSubtitle: "", backSubtitle: "",
+        front: data.front, back: data.back, subtitle: data.subtitle || "", footnote: data.footnote || "",
         pronunciation: data.pronunciation || "", examples: data.examples || [""],
         deckId: selectedDeck || (decks[0]?.id || ""),
       });
@@ -335,6 +351,17 @@ export default function VocabularyPage() {
     finally { setBulkLoading(false); }
   };
 
+  const handleAdoptDeck = async (id: string) => {
+    setAdopting(id);
+    try {
+      await adoptDeck(id);
+      toast.success("Набор добавлен в твою коллекцию");
+      setShowTemplates(false);
+      fetchCards(); 
+    } catch { toast.error("Ошибка загрузки набора"); }
+    finally { setAdopting(null); }
+  };
+
   const handleSaveCard = async () => {
     if (!newCard.front || !newCard.back) { toast.error("Заполни слово и перевод"); return; }
     try {
@@ -347,7 +374,7 @@ export default function VocabularyPage() {
         toast.success("Карточка добавлена");
       }
       setShowAddCard(false); setEditCard(null);
-      setNewCard({ front: "", back: "", frontSubtitle: "", backSubtitle: "", pronunciation: "", examples: [""], deckId: selectedDeck || "" });
+      setNewCard({ front: "", back: "", subtitle: "", footnote: "", pronunciation: "", examples: [""], deckId: selectedDeck || "" });
     } catch { toast.error("Ошибка сохранения"); }
   };
 
@@ -355,7 +382,7 @@ export default function VocabularyPage() {
     setEditCard(card);
     setNewCard({
       front: card.front, back: card.back,
-      frontSubtitle: (card as any).frontSubtitle || "", backSubtitle: (card as any).backSubtitle || "",
+      subtitle: card.subtitle || "", footnote: card.footnote || "",
       pronunciation: card.pronunciation || "", examples: (card.examples as string[]) || [""],
       deckId: card.deckId || "",
     });
@@ -393,7 +420,7 @@ export default function VocabularyPage() {
     try {
       await createDeck(newDeck);
       toast.success("Набор создан"); setShowAddDeck(false);
-      setNewDeck({ name: "", emoji: "📚", color: "#6366f1" });
+      setNewDeck({ name: "", emoji: "📚", color: "#6366f1", isPublic: false });
     } catch { toast.error("Ошибка"); }
   };
 
@@ -409,6 +436,9 @@ export default function VocabularyPage() {
           <p className="text-sm text-muted-foreground mt-0.5">{cards.length} слов</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowTemplates(true)}>
+            <Library size={13} /> Шаблоны
+          </Button>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowAddDeck(true)}>
             <FolderPlus size={13} /> Набор
           </Button>
@@ -575,11 +605,11 @@ export default function VocabularyPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block font-medium">Подпись к слову</label>
-                    <Input value={newCard.frontSubtitle} onChange={(e) => setNewCard({ ...newCard, frontSubtitle: e.target.value })} placeholder="существительное" />
+                    <Input value={newCard.subtitle} onChange={(e) => setNewCard({ ...newCard, subtitle: e.target.value })} placeholder="существительное" />
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block font-medium">Подпись к переводу</label>
-                    <Input value={newCard.backSubtitle} onChange={(e) => setNewCard({ ...newCard, backSubtitle: e.target.value })} placeholder="фрукт" />
+                    <Input value={newCard.footnote} onChange={(e) => setNewCard({ ...newCard, footnote: e.target.value })} placeholder="фрукт" />
                   </div>
                 </div>
                 <div>
@@ -589,6 +619,35 @@ export default function VocabularyPage() {
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block font-medium">Пример</label>
                   <Input value={newCard.examples[0]} onChange={(e) => setNewCard({ ...newCard, examples: [e.target.value] })} placeholder="I ate an apple." />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 flex items-center justify-between font-medium">
+                    <span>Картинка (URL)</span>
+                    <button 
+                      className="text-violet-500 font-semibold flex items-center gap-1 hover:text-violet-400 transition-colors bg-violet-500/10 px-2 py-0.5 rounded-md"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (!newCard.front) { toast.error("Сначала введи английское слово"); return; }
+                        const prompt = `${newCard.front}. Beautiful simple minimalistic flat vector illustration, colorful, solid pastel background, no text, clean design`;
+                        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=512&height=512&nologo=true`;
+                        setNewCard({ ...newCard, imageUrl: url });
+                      }}
+                    >
+                      <Sparkles size={10} /> AI сгенерировать бесплатно
+                    </button>
+                  </label>
+                  <Input value={newCard.imageUrl || ""} onChange={(e) => setNewCard({ ...newCard, imageUrl: e.target.value })} placeholder="https://image.pollinations.ai/..." />
+                  {newCard.imageUrl && (
+                    <div className="mt-2 w-full h-24 rounded-xl overflow-hidden border border-border/50 relative bg-black/5 group flex items-center justify-center">
+                      <img src={newCard.imageUrl} alt="preview" className="max-w-full max-h-full object-contain" loading="lazy" />
+                      <button 
+                        onClick={() => setNewCard({ ...newCard, imageUrl: "" })}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-md bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block font-medium">Набор</label>
@@ -710,6 +769,20 @@ export default function VocabularyPage() {
                     ))}
                   </div>
                 </div>
+                {user?.role === "admin" && (
+                  <div className="flex items-center gap-2 mt-4 bg-accent/30 p-3 rounded-xl border border-primary/20">
+                    <input 
+                      type="checkbox" 
+                      id="isPublic"
+                      className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                      checked={newDeck.isPublic} 
+                      onChange={(e) => setNewDeck({ ...newDeck, isPublic: e.target.checked })} 
+                    />
+                    <label htmlFor="isPublic" className="text-sm font-medium cursor-pointer flex-1">
+                      Сделать публичным шаблоном 👑 <span className="text-muted-foreground text-xs block font-normal mt-0.5">Все пользователи смогут скопировать этот набор</span>
+                    </label>
+                  </div>
+                )}
                 {/* Preview */}
                 <div className="rounded-xl overflow-hidden h-14 relative border border-border/40">
                   <div className="absolute inset-0 flex">
@@ -728,6 +801,64 @@ export default function VocabularyPage() {
                 <Button className="w-full btn-gradient" onClick={handleCreateDeck} disabled={!newDeck.name}>
                   Создать набор
                 </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* === Templates Browser Modal === */}
+      <AnimatePresence>
+        {showTemplates && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={(e) => e.target === e.currentTarget && setShowTemplates(false)}>
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-card-strong bg-card border rounded-2xl p-6 w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+              <div className="flex justify-between items-center mb-5 flex-shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <Library size={17} className="text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Библиотека наборов</h3>
+                    <p className="text-xs text-muted-foreground">Готовые наборы для изучения</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowTemplates(false)}
+                  className="w-8 h-8 rounded-xl hover:bg-accent flex items-center justify-center text-muted-foreground">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-hide pb-2">
+                {publicDecks.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    <Library className="mx-auto mb-3 opacity-30" size={32} />
+                    <p>Нет доступных шаблонов</p>
+                  </div>
+                ) : (
+                  publicDecks.map((deck) => (
+                    <div key={deck.id} className="relative flex items-center p-3 rounded-2xl border bg-card/50 hover:bg-accent/30 transition-colors">
+                      <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl flex-shrink-0" style={{ background: `${deck.color}30` }}>
+                        {deck.imageUrl ? <img src={deck.imageUrl} className="w-full h-full object-cover rounded-xl" alt="" /> : !!deck.emoji ? deck.emoji : "📚"}
+                      </div>
+                      <div className="ml-4 flex-1">
+                        <h4 className="font-semibold text-sm">{deck.name}</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{deck.description || "Нет описания"}</p>
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-accent text-accent-foreground">{deck.category}</span>
+                          <span className="text-[10px] text-muted-foreground">{deck.cardCount} карточек</span>
+                        </div>
+                      </div>
+                      <Button size="sm" variant="gradient" className="ml-3 gap-1.5" 
+                        onClick={() => handleAdoptDeck(deck.id)} 
+                        disabled={adopting === deck.id}>
+                        {adopting === deck.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                        Добавить
+                      </Button>
+                    </div>
+                  ))
+                )}
               </div>
             </motion.div>
           </motion.div>

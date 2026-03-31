@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 
-type TabId = "overview" | "users" | "plans" | "ai" | "broadcast";
+type TabId = "overview" | "users" | "plans" | "ai" | "hf" | "broadcast";
 
 export default function AdminPage() {
   const { user } = useAuthStore();
@@ -21,6 +21,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [aiSettings, setAiSettings] = useState<any>(null);
+  const [hfSettings, setHfSettings] = useState<any>(null);
   const [tab, setTab] = useState<TabId>("overview");
   const [search, setSearch] = useState("");
   const [broadcastMsg, setBroadcastMsg] = useState("");
@@ -35,6 +36,12 @@ export default function AdminPage() {
     temperature: "0.7",
     maxTokens: "2048",
     apiKey: "",
+  });
+  const [savingHf, setSavingHf] = useState(false);
+  const [hfForm, setHfForm] = useState({
+    ttsModel: "",
+    speechModel: "",
+    apiToken: "",
   });
 
   useEffect(() => {
@@ -62,18 +69,29 @@ export default function AdminPage() {
     });
   }, [aiSettings]);
 
+  useEffect(() => {
+    if (!hfSettings) return;
+    setHfForm({
+      ttsModel: hfSettings.ttsModel || "",
+      speechModel: hfSettings.speechModel || "",
+      apiToken: "",
+    });
+  }, [hfSettings]);
+
   async function loadData() {
-    const [nextStats, nextUsers, nextPlans, nextAiSettings] = await Promise.all([
+    const [nextStats, nextUsers, nextPlans, nextAiSettings, nextHfSettings] = await Promise.all([
       adminApi.getStats(),
       adminApi.getUsers({ limit: 50 }),
       adminApi.getPlans(),
       adminApi.getAiSettings(),
-    ]).catch(() => [null, [], [], null]);
+      adminApi.getHfSettings(),
+    ]).catch(() => [null, [], [], null, null]);
 
     setStats(nextStats);
     setUsers(nextUsers);
     setPlans(nextPlans);
     setAiSettings(nextAiSettings);
+    setHfSettings(nextHfSettings);
   }
 
   async function handleGivePremium(userId: string, days: number) {
@@ -127,6 +145,27 @@ export default function AdminPage() {
     }
   }
 
+  async function handleSaveHfSettings() {
+    setSavingHf(true);
+    try {
+      const payload: any = {
+        ttsModel: hfForm.ttsModel.trim(),
+        speechModel: hfForm.speechModel.trim(),
+      };
+      if (hfForm.apiToken.trim()) {
+        payload.apiToken = hfForm.apiToken.trim();
+      }
+      const saved = await adminApi.updateHfSettings(payload);
+      setHfSettings(saved);
+      setHfForm((current) => ({ ...current, apiToken: "" }));
+      toast.success("HuggingFace settings saved");
+    } catch {
+      toast.error("Failed to save HuggingFace settings");
+    } finally {
+      setSavingHf(false);
+    }
+  }
+
   const filteredUsers = users.filter((entry) =>
     !search ||
     entry.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -164,6 +203,7 @@ export default function AdminPage() {
           { id: "users", label: `Пользователи (${users.length})` },
           { id: "plans", label: "Планы" },
           { id: "ai", label: "AI настройки" },
+          { id: "hf", label: "HuggingFace (TTS)" },
           { id: "broadcast", label: "Рассылка" },
         ].map((item) => (
           <button
@@ -397,6 +437,80 @@ export default function AdminPage() {
             <div className="rounded-xl border border-white/10 bg-black/10 p-4 text-sm text-muted-foreground space-y-2">
               <p>All AI endpoints in English now use OpenRouter.</p>
               <p>Bulk generation, flashcard generation, association game, and pronunciation analysis share this configuration.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "hf" && (
+        <div className="grid lg:grid-cols-[1.25fr_0.75fr] gap-6">
+          <div className="glass-card rounded-2xl p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Bot size={18} className="text-orange-400" />
+              <h3 className="font-semibold">HuggingFace Configuration</h3>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-muted-foreground">TTS Model</label>
+                <Input value={hfForm.ttsModel} onChange={(event) => setHfForm((current) => ({ ...current, ttsModel: event.target.value }))} placeholder="facebook/mms-tts-eng" />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm text-muted-foreground">Speech Analysis Model</label>
+                <Input value={hfForm.speechModel} onChange={(event) => setHfForm((current) => ({ ...current, speechModel: event.target.value }))} placeholder="openai/whisper-small" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">HuggingFace API Token</label>
+              <Input
+                type="password"
+                value={hfForm.apiToken}
+                onChange={(event) => setHfForm((current) => ({ ...current, apiToken: event.target.value }))}
+                placeholder={hfSettings?.hasApiToken ? "Leave empty to keep current token" : "hf_..."}
+              />
+              <p className="text-xs text-muted-foreground">
+                Required for Text-to-Speech and Speech Analysis via Inference API.
+              </p>
+            </div>
+
+            <Button variant="gradient" onClick={handleSaveHfSettings} disabled={savingHf} className="gap-2">
+              <Save size={16} />
+              {savingHf ? "Saving..." : "Save HuggingFace Settings"}
+            </Button>
+          </div>
+
+          <div className="glass-card rounded-2xl p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <KeyRound size={18} className="text-amber-400" />
+              <h3 className="font-semibold">Current state</h3>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">API Token</span>
+                <Badge variant={hfSettings?.hasApiToken ? "default" : "secondary"}>
+                  {hfSettings?.hasApiToken ? (hfSettings?.maskedApiToken || "Configured") : "Missing"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">TTS Model</span>
+                <span className="text-right break-all">{hfSettings?.ttsModel || "Not set"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Source</span>
+                <Badge variant="secondary">{hfSettings?.source || "default"}</Badge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Updated</span>
+                <span>{hfSettings?.updatedAt ? formatDate(hfSettings.updatedAt) : "Not yet saved"}</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/10 p-4 text-sm text-muted-foreground space-y-2">
+              <p>HuggingFace powers the realistic Text-To-Speech (TTS) engine and pronunciation analysis tools.</p>
+              <p>Generated audio is automatically cached in VoidDB Blob Storage using the <code className="text-[10px] bg-black/20 px-1 rounded border border-white/5">english-sounds</code> bucket.</p>
             </div>
           </div>
         </div>

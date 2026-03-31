@@ -45,6 +45,8 @@ export const authApi = {
 // Cards & Decks
 export const cardsApi = {
   getDecks: () => apiClient.get("/cards/decks").then((r) => r.data),
+  getPublicDecks: () => apiClient.get("/cards/decks/public").then((r) => r.data),
+  adoptDeck: (id: string) => apiClient.post(`/cards/decks/${id}/adopt`).then((r) => r.data),
   createDeck: (data: any) => apiClient.post("/cards/decks", data).then((r) => r.data),
   updateDeck: (id: string, data: any) => apiClient.patch(`/cards/decks/${id}`, data).then((r) => r.data),
   deleteDeck: (id: string) => apiClient.delete(`/cards/decks/${id}`).then((r) => r.data),
@@ -77,6 +79,7 @@ export const aiApi = {
   analyzePronunciation: (data: any) => apiClient.post("/ai/analyze-pronunciation", data).then((r) => r.data),
   analyzeWriting: (data: { text: string }) => apiClient.post("/ai/analyze-writing", data).then((r) => r.data),
   getDailyPlan: () => apiClient.get("/ai/daily-plan").then((r) => r.data),
+  textToSpeech: (data: { text: string; model?: string }) => apiClient.post("/tts", data).then((r) => r.data),
 };
 
 // Recordings
@@ -179,6 +182,8 @@ export const adminApi = {
   getStats: () => apiClient.get("/admin/stats").then((r) => r.data),
   getAiSettings: () => apiClient.get("/admin/ai-settings").then((r) => r.data),
   updateAiSettings: (data: any) => apiClient.patch("/admin/ai-settings", data).then((r) => r.data),
+  getHfSettings: () => apiClient.get("/admin/hf-settings").then((r) => r.data),
+  updateHfSettings: (data: any) => apiClient.patch("/admin/hf-settings", data).then((r) => r.data),
   getUsers: (params?: any) => apiClient.get("/admin/users", { params }).then((r) => r.data),
   getUser: (id: string) => apiClient.get(`/admin/users/${id}`).then((r) => r.data),
   updateUser: (id: string, data: any) => apiClient.patch(`/admin/users/${id}`, data).then((r) => r.data),

@@ -145,6 +145,9 @@ export default function StudyPage() {
               {/* Front */}
               <div className="flip-card-front glass-card rounded-3xl flex flex-col items-center justify-center p-8 select-none">
                 <div className="text-5xl font-bold mb-4 gradient-text">{currentCard.front}</div>
+                {currentCard.subtitle && (
+                  <div className="text-xl text-primary/70 mb-3">{currentCard.subtitle}</div>
+                )}
                 {currentCard.pronunciation && (
                   <div className="text-lg text-muted-foreground font-mono mb-3">{currentCard.pronunciation}</div>
                 )}
@@ -160,6 +163,9 @@ export default function StudyPage() {
               {/* Back */}
               <div className="flip-card-back glass-card rounded-3xl flex flex-col items-center justify-center p-8 select-none bg-gradient-to-br from-red-500/10 to-blue-500/10">
                 <div className="text-4xl font-bold mb-3">{currentCard.back}</div>
+                {currentCard.footnote && (
+                  <div className="text-lg text-muted-foreground italic mb-2">{currentCard.footnote}</div>
+                )}
                 {currentCard.examples?.length > 0 && (
                   <div className="text-sm text-muted-foreground text-center max-w-xs mt-2">
                     <span className="italic">"{currentCard.examples[0]}"</span>

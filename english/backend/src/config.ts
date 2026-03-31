@@ -64,6 +64,11 @@ export const config = {
     temperature: parseFloatWithDefault(process.env.OPENROUTER_TEMPERATURE, 0.7),
     maxTokens: parseIntWithDefault(process.env.OPENROUTER_MAX_TOKENS, 2048),
   },
+  huggingface: {
+    apiToken: process.env.HF_API_TOKEN || "",
+    ttsModel: process.env.HF_TTS_MODEL || "facebook/mms-tts-eng",
+    speechModel: process.env.HF_SPEECH_MODEL || "openai/whisper-small",
+  },
   uploadsDir: process.env.UPLOADS_DIR || "./uploads",
   frontendUrl: process.env.FRONTEND_URL || defaultFrontendUrl,
   corsOrigins: parseOrigins(process.env.CORS_ORIGINS),

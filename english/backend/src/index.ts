@@ -7,6 +7,7 @@ import { config } from "./config";
 import { authRoutes } from "./auth/routes";
 import { cardsRoutes } from "./cards/routes";
 import { aiRoutes } from "./ai/routes";
+import { ttsRoutes } from "./ai/tts";
 import { recordingsRoutes } from "./recordings/routes";
 import { gamesRoutes } from "./games/routes";
 import { paymentsRoutes } from "./payments/routes";
@@ -108,6 +109,7 @@ const app = new Elysia()
   .use(authRoutes)
   .use(cardsRoutes)
   .use(aiRoutes)
+  .use(ttsRoutes)
   .use(recordingsRoutes)
   .use(gamesRoutes)
   .use(paymentsRoutes)
