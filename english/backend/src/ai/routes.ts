@@ -3,7 +3,8 @@ import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
 import { callOpenRouter, parseJsonFromAi } from "./openrouter";
-import { getAiSettings } from "./settings";
+import { getHfSettings } from "./hf-settings";
+import { optimizeImageUpload } from "../media";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -25,6 +26,109 @@ function fallbackCardGeneration(word: string) {
     examples: [`I use the word "${word}" in a sentence.`, `Another example with "${word}".`],
     tags: ["generated", "vocabulary"],
   };
+}
+
+function normalizeText(value: string) {
+  return value.trim().toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, "").replace(/\s+/g, " ");
+}
+
+function calculateTextScore(target: string, spoken: string) {
+  const normalizedTarget = normalizeText(target);
+  const normalizedSpoken = normalizeText(spoken);
+
+  if (!normalizedTarget || !normalizedSpoken) {
+    return 0;
+  }
+
+  const targetWords = normalizedTarget.split(" ");
+  const spokenWords = normalizedSpoken.split(" ");
+  const matchedWords = targetWords.filter((word) => spokenWords.includes(word)).length;
+  const wordScore = matchedWords / Math.max(targetWords.length, 1);
+
+  let charMatches = 0;
+  const maxLength = Math.max(normalizedTarget.length, normalizedSpoken.length, 1);
+  for (let index = 0; index < Math.min(normalizedTarget.length, normalizedSpoken.length); index += 1) {
+    if (normalizedTarget[index] === normalizedSpoken[index]) {
+      charMatches += 1;
+    }
+  }
+
+  const charScore = charMatches / maxLength;
+  return Math.max(0, Math.min(100, Math.round((wordScore * 0.7 + charScore * 0.3) * 100)));
+}
+
+function buildFallbackPronunciationAnalysis(targetText: string, spokenText: string, targetIpa?: string) {
+  const score = spokenText ? calculateTextScore(targetText, spokenText) : 35;
+  const suggestions = score >= 85
+    ? ["Повтори фразу в обычном темпе и затем ускорься.", "Закрепи произношение в связной речи."]
+    : [
+        "Слушай эталон и повторяй по частям.",
+        "Сначала проговори медленно, затем в обычном темпе.",
+        targetIpa ? `Ориентируйся на IPA: ${targetIpa}` : "Сконцентрируйся на ударении и гласных.",
+      ];
+
+  return {
+    score,
+    feedback: score >= 85
+      ? "Произношение близко к эталону."
+      : score >= 65
+        ? "Есть хорошие совпадения, но стоит точнее проговорить отдельные слова."
+        : "Пока слышно заметное расхождение с эталонной фразой.",
+    suggestions,
+    improvements: suggestions,
+    phonemeErrors: score >= 85
+      ? []
+      : [{
+          expected: targetText,
+          actual: spokenText || "не распознано",
+          tip: targetIpa ? `Сравни с эталонной IPA: ${targetIpa}` : "Сравни свою запись с эталонным озвучиванием.",
+        }],
+    spokenText,
+  };
+}
+
+async function transcribeAudioWithHf(file: File) {
+  const settings = await getHfSettings();
+  if (!settings.apiToken) {
+    return null;
+  }
+
+  const endpoints = [
+    `https://router.huggingface.co/hf-inference/models/${settings.speechModel}`,
+    `https://api-inference.huggingface.co/models/${settings.speechModel}`,
+  ];
+
+  const payload = await file.arrayBuffer();
+  const contentType = file.type || "audio/webm";
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          "Content-Type": contentType,
+        },
+        body: payload,
+      });
+
+      const raw = await response.text();
+      if (!response.ok) {
+        console.error("[hf-asr] error from %s: %d %s", settings.speechModel, response.status, raw.slice(0, 300));
+        continue;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "string") return parsed.trim();
+      if (typeof parsed?.text === "string") return parsed.text.trim();
+      if (Array.isArray(parsed) && typeof parsed[0]?.text === "string") return parsed[0].text.trim();
+      if (typeof parsed?.generated_text === "string") return parsed.generated_text.trim();
+    } catch (error) {
+      console.error("[hf-asr] transcription failed:", error);
+    }
+  }
+
+  return null;
 }
 
 export const aiRoutes = new Elysia({ prefix: "/ai" })
@@ -65,6 +169,57 @@ Include 2 example sentences, IPA pronunciation, and relevant tags (e.g., noun, v
       word: t.String(),
       targetLanguage: t.Optional(t.String()),
       context: t.Optional(t.String()),
+    }),
+  })
+
+  .post("/generate-image", async ({ headers, body, jwt, set }) => {
+    const user = await getUser(headers, jwt, set);
+    const { prompt, kind = "card" } = body;
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      set.status = 400;
+      return { error: "Prompt is required" };
+    }
+
+    try {
+      const response = await fetch(
+        `https://image.pollinations.ai/prompt/${encodeURIComponent(normalizedPrompt)}?width=1024&height=1024&nologo=true`,
+      );
+
+      if (!response.ok) {
+        set.status = 502;
+        return { error: "Image generation failed" };
+      }
+
+      const optimized = await optimizeImageUpload(await response.arrayBuffer(), {
+        width: 1024,
+        height: 1024,
+        fit: "cover",
+        quality: 86,
+      });
+      const asset = await db.create("EnglishGeneratedImages", {
+        userId: user.id,
+        prompt: normalizedPrompt,
+        kind,
+        imageUrl: "",
+      });
+      const ref = await db.uploadFile("EnglishGeneratedImages", asset.id, "image", optimized.buffer, {
+        filename: `${asset.id}.${optimized.extension}`,
+        contentType: optimized.contentType,
+        bucket: "english-media",
+      });
+      const imageUrl = await db.blobUrl("EnglishGeneratedImages", ref);
+      await db.update("EnglishGeneratedImages", asset.id, { imageUrl });
+      return { id: asset.id, imageUrl };
+    } catch (error) {
+      console.error("[ai-image] generation failed:", error);
+      set.status = 500;
+      return { error: "Image generation failed" };
+    }
+  }, {
+    body: t.Object({
+      prompt: t.String({ minLength: 3 }),
+      kind: t.Optional(t.String()),
     }),
   })
 
@@ -181,6 +336,22 @@ Analyze their pronunciation accuracy (score 0-100) and provide constructive feed
       transcription: t.String(),
       correctIpa: t.Optional(t.String()),
     }),
+  })
+
+  .post("/analyze-pronunciation-audio", async ({ headers, jwt, set, request }) => {
+    await getUser(headers, jwt, set);
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const targetText = String(formData.get("targetText") || "").trim();
+    const targetIpa = String(formData.get("targetIpa") || "").trim();
+
+    if (!file || !targetText) {
+      set.status = 400;
+      return { error: "file and targetText are required" };
+    }
+
+    const spokenText = (await transcribeAudioWithHf(file)) || "";
+    return buildFallbackPronunciationAnalysis(targetText, spokenText, targetIpa);
   })
 
   // Writing analysis

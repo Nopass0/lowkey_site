@@ -15,6 +15,32 @@ async function getUser(headers: any, jwtInstance: any, set: any) {
   return user;
 }
 
+function buildGrammarFallbackExplanation(text: string, question?: string) {
+  const source = `${text} ${question || ""}`.toLowerCase();
+
+  if (/present simple|does|do\b|third person|he |she |it /.test(source)) {
+    return "Present Simple используется для привычек, фактов и регулярных действий. Для he/she/it к глаголу обычно добавляется -s или -es: `She works`, `He goes`. В отрицаниях и вопросах после `does/doesn't` используется базовая форма глагола: `Does she work?`, `He doesn't go`.";
+  }
+
+  if (/present continuous|am|is|are|ing/.test(source)) {
+    return "Present Continuous показывает действие прямо сейчас или временную ситуацию. Формула: `am/is/are + verb-ing`: `I am reading`, `They are studying`. В вопросе вспомогательный глагол ставится перед подлежащим, а в отрицании добавляется `not`.";
+  }
+
+  if (/past simple|did|yesterday|last /.test(source)) {
+    return "Past Simple описывает завершённое действие в прошлом. У правильных глаголов обычно используется окончание `-ed`, а у неправильных форма меняется: `worked`, `went`, `saw`. В вопросах и отрицаниях с `did/didn't` основной глагол снова идёт в базовой форме.";
+  }
+
+  if (/article|articles| a | an | the /.test(source)) {
+    return "Артикли показывают, насколько предмет конкретный. `a/an` используются, когда речь идёт о любом одном предмете впервые, а `the` — когда объект уже известен или уникален. `a` ставится перед согласным звуком, `an` — перед гласным: `a book`, `an apple`, `the sun`.";
+  }
+
+  if (/modal|can|could|must|should|might|may|would/.test(source)) {
+    return "Модальные глаголы выражают возможность, совет, обязанность или вероятность. После них используется базовая форма основного глагола без `to`: `can go`, `should study`, `must leave`. Значение зависит от самого модального глагола: `can` — возможность, `should` — совет, `must` — обязанность.";
+  }
+
+  return "Смотри на форму глагола и на контекст предложения: время, регулярность, завершённость действия и роль подлежащего обычно подсказывают нужную конструкцию. Проверь три вещи: какой это момент во времени, меняется ли форма глагола и нужен ли вспомогательный глагол. Если сомневаешься, сравни утверждение, отрицание и вопрос для одной и той же фразы.";
+}
+
 // callOpenRouter is now imported from ../ai/openrouter
 
 const GRAMMAR_SEED = [
@@ -286,6 +312,15 @@ Difficulty: 1=easy, 2=medium, 3=hard. Mix difficulties.`;
     if (response) {
       return { explanation: response };
     }
+
+    const legacySettings = await getAiSettings();
+    if (!legacySettings.apiKey) {
+      return {
+        explanation: `${buildGrammarFallbackExplanation(text, question)}\n\nOpenRouter API key is not configured in admin settings yet.`,
+      };
+    }
+
+    return { explanation: buildGrammarFallbackExplanation(text, question) };
 
     // Provide a specific error so the user/admin knows what to fix
     const settings = await getAiSettings();

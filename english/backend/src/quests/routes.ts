@@ -2,7 +2,7 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
-import { getAiSettings } from "../ai/settings";
+import { callOpenRouter } from "../ai/openrouter";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -12,34 +12,6 @@ async function getUser(headers: any, jwtInstance: any, set: any) {
   const user = await db.findOne("EnglishUsers", [db.filter.eq("id", (payload as any).userId)]);
   if (!user) { set.status = 404; throw new Error("Not found"); }
   return user;
-}
-
-async function callOpenRouter(prompt: string, systemPrompt: string, maxTokens = 2000) {
-  const settings = await getAiSettings();
-  if (!settings.apiKey || !settings.model) return null;
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.8,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch { return null; }
 }
 
 const DIFFICULTY_TOPICS: Record<string, string[][]> = {
@@ -112,7 +84,7 @@ Return JSON:
   "xpReward": ${difficulty === "easy" ? 50 : difficulty === "medium" ? 100 : 200}
 }`;
 
-    const aiResponse = await callOpenRouter(prompt, systemPrompt, 1500);
+    const aiResponse = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1500, temperature: 0.8 });
     let questData: any = null;
 
     if (aiResponse) {
@@ -198,7 +170,7 @@ Evaluate the response and return JSON:
   "alternativePhrase": "A better way to say the key part of their response"
 }`;
 
-    const aiResponse = await callOpenRouter(prompt, systemPrompt, 2000);
+    const aiResponse = await callOpenRouter(prompt, systemPrompt, { maxTokens: 2000, temperature: 0.8 });
     let evaluation: any = null;
 
     if (aiResponse) {

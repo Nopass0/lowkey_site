@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { aiApi } from "@/api/client";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
+import { speakEnglishText } from "@/lib/tts";
 
 const PRACTICE_WORDS = [
   { word: "thought",       ipa: "/θɔːt/",           tip: "Звук 'th' — кончик языка между зубами", category: "th-sounds" },
@@ -71,29 +72,8 @@ export default function PronunciationPage() {
 
   const targetText = customText.trim() || (mode === "words" ? selectedWord.word : SENTENCES[0].en);
 
-  const getVoice = (): SpeechSynthesisVoice | undefined => {
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("en"));
-    return voices.find(v =>
-      v.name.includes("Google US") ||
-      v.name.includes("Google UK") ||
-      v.name.includes("Natural") ||
-      v.name.includes("Neural")
-    ) || voices[0];
-  };
-
-  const speak = (text: string, slow = false) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "en-US";
-    utt.rate = slow ? 0.6 : 0.85;
-    utt.pitch = 1.0;
-    const voice = getVoice();
-    if (voice) utt.voice = voice;
-    setSpeaking(true);
-    utt.onend = () => setSpeaking(false);
-    utt.onerror = () => setSpeaking(false);
-    window.speechSynthesis.speak(utt);
+  const speak = async (text: string) => {
+    await speakEnglishText(text, { onStateChange: setSpeaking });
   };
 
   const startRecording = async () => {
@@ -136,22 +116,35 @@ export default function PronunciationPage() {
     mediaRecorderRef.current?.stop();
     mediaRecorderRef.current?.stream.getTracks().forEach(t => t.stop());
 
-    // Small delay for recognition to finalize
     await new Promise(r => setTimeout(r, 600));
-    if (spokenText || customText) {
-      analyzeResult(spokenText);
+    const audioBlob = chunksRef.current.length > 0
+      ? new Blob(chunksRef.current, { type: mediaRecorderRef.current?.mimeType || "audio/webm" })
+      : null;
+    if (audioBlob || spokenText || customText) {
+      analyzeResult(spokenText, audioBlob);
     }
   };
 
-  const analyzeResult = async (spoken: string) => {
+  const analyzeResult = async (spoken: string, audioBlob?: Blob | null) => {
     setAnalyzing(true);
     const target = customText.trim() || targetText;
     try {
-      const data = await aiApi.analyzePronunciation({
-        targetText: target,
-        spokenText: spoken || target,
-        targetIPA: mode === "words" ? selectedWord.ipa : "",
-      });
+      let data: any;
+      if (audioBlob && audioBlob.size > 0) {
+        const formData = new FormData();
+        formData.append("file", audioBlob, `pronunciation-${Date.now()}.webm`);
+        formData.append("targetText", target);
+        if (mode === "words" && selectedWord.ipa) {
+          formData.append("targetIpa", selectedWord.ipa);
+        }
+        data = await aiApi.analyzePronunciationAudio(formData);
+      } else {
+        data = await aiApi.analyzePronunciation({
+          word: target,
+          transcription: spoken || target,
+          correctIpa: mode === "words" ? selectedWord.ipa : "",
+        });
+      }
 
       // Map AI response to our Analysis type
       const score = data.score || 70;
@@ -160,7 +153,7 @@ export default function PronunciationPage() {
         score,
         accuracy: `${score}%`,
         target,
-        spoken: spoken,
+        spoken: data.spokenText || spoken,
         feedback: data.feedback || data.overallFeedback || "Хорошая попытка!",
         suggestions: data.improvements || data.suggestions || [],
         phonemeFeedback: data.phonemeErrors?.map((e: any) => ({
@@ -323,7 +316,7 @@ export default function PronunciationPage() {
                 variant="outline"
                 size="sm"
                 className="gap-1.5 text-muted-foreground"
-                onClick={() => speak(customText || (mode === "words" ? selectedWord.word : SENTENCES[0].en), true)}
+                onClick={() => speak(customText || (mode === "words" ? selectedWord.word : SENTENCES[0].en))}
               >
                 <Play size={13} />
                 Медленно

@@ -1,9 +1,9 @@
 import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import bcrypt from "bcryptjs";
-import sharp from "sharp";
 import { db } from "../db";
 import { config } from "../config";
+import { optimizeImageUpload } from "../media";
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
   .use(jwt({ name: "jwt", secret: config.jwtSecret }))
@@ -162,15 +162,17 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       let finalType = file.type || `image/${ext}`;
       let finalExt = ext;
 
-      // Optimize images (except animated GIFs)
       if (ext !== "gif") {
         try {
-          finalBuffer = await sharp(finalBuffer)
-            .resize({ width: 256, height: 256, fit: "cover" })
-            .webp({ quality: 85 })
-            .toBuffer();
-          finalType = "image/webp";
-          finalExt = "webp";
+          const optimized = await optimizeImageUpload(finalBuffer, {
+            width: 256,
+            height: 256,
+            fit: "cover",
+            quality: 86,
+          });
+          finalBuffer = optimized.buffer;
+          finalType = optimized.contentType;
+          finalExt = optimized.extension;
         } catch (error) {
           console.error("[avatar] failed to optimize image", error);
         }
@@ -187,6 +189,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const avatarRef = await db.uploadFile("EnglishUsers", userId, "avatar", finalBuffer as any, {
         filename,
         contentType: finalType,
+        bucket: "english-media",
       });
       const avatarUrl = await db.blobUrl("EnglishUsers", avatarRef);
       const updated = await db.update("EnglishUsers", userId, { avatarUrl });

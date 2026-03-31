@@ -2,7 +2,7 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
-import { getAiSettings } from "../ai/settings";
+import { callOpenRouter } from "../ai/openrouter";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,34 +23,6 @@ function generateInviteCode(): string {
   let code = "";
   for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
-}
-
-async function callOpenRouter(prompt: string, systemPrompt: string) {
-  const settings = await getAiSettings();
-  if (!settings.apiKey || !settings.model) return null;
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: settings.maxTokens,
-        temperature: settings.temperature,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch { return null; }
 }
 
 // Auto-grade a single question answer

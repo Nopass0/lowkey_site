@@ -74,9 +74,12 @@ export const cardsApi = {
 // AI
 export const aiApi = {
   generateCard: (data: any) => apiClient.post("/ai/generate-card", data).then((r) => r.data),
+  generateImage: (data: { prompt: string; kind?: string }) => apiClient.post("/ai/generate-image", data).then((r) => r.data),
   generateCardsBulk: (data: any) => apiClient.post("/ai/generate-cards-bulk", data).then((r) => r.data),
   associationGame: (data: any) => apiClient.post("/ai/association-game", data).then((r) => r.data),
   analyzePronunciation: (data: any) => apiClient.post("/ai/analyze-pronunciation", data).then((r) => r.data),
+  analyzePronunciationAudio: (formData: FormData) =>
+    apiClient.post("/ai/analyze-pronunciation-audio", formData, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data),
   analyzeWriting: (data: { text: string }) => apiClient.post("/ai/analyze-writing", data).then((r) => r.data),
   getDailyPlan: () => apiClient.get("/ai/daily-plan").then((r) => r.data),
   textToSpeech: (data: { text: string; model?: string }) => apiClient.post("/tts", data).then((r) => r.data),
@@ -184,6 +187,9 @@ export const adminApi = {
   updateAiSettings: (data: any) => apiClient.patch("/admin/ai-settings", data).then((r) => r.data),
   getHfSettings: () => apiClient.get("/admin/hf-settings").then((r) => r.data),
   updateHfSettings: (data: any) => apiClient.patch("/admin/hf-settings", data).then((r) => r.data),
+  getTemplateDecks: (params?: any) => apiClient.get("/admin/template-decks", { params }).then((r) => r.data),
+  updateTemplateDeck: (id: string, data: any) => apiClient.patch(`/admin/template-decks/${id}`, data).then((r) => r.data),
+  getContentOverview: () => apiClient.get("/admin/content-overview").then((r) => r.data),
   getUsers: (params?: any) => apiClient.get("/admin/users", { params }).then((r) => r.data),
   getUser: (id: string) => apiClient.get(`/admin/users/${id}`).then((r) => r.data),
   updateUser: (id: string, data: any) => apiClient.patch(`/admin/users/${id}`, data).then((r) => r.data),

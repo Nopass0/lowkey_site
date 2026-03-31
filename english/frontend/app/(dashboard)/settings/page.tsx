@@ -51,7 +51,7 @@ export default function SettingsPage() {
       const updated = await authApi.uploadAvatar(file);
       setUser(updated);
       toast.success("Фото обновлено");
-    } catch { toast.error("Ошибка загрузки фото"); }
+    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка загрузки фото"); }
     finally { setAvatarUploading(false); if (avatarInputRef.current) avatarInputRef.current.value = ""; }
   };
 

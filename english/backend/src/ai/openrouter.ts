@@ -15,54 +15,72 @@ export async function callOpenRouter(
   opts: CallOptions = {},
 ): Promise<string | null> {
   const settings = await getAiSettings();
+  const models = [
+    settings.model,
+    process.env.OPENROUTER_MODEL || process.env.OPENROUTER_DEFAULT_MODEL || "",
+    "openai/gpt-4o-mini",
+  ]
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index);
 
   if (!settings.apiKey) {
-    console.warn("[openrouter] call skipped — API key is not configured (source: %s)", settings.source);
+    console.warn("[openrouter] call skipped - API key is not configured (source: %s)", settings.source);
     return null;
   }
 
-  if (!settings.model) {
-    console.warn("[openrouter] call skipped — model is not configured (source: %s)", settings.source);
+  if (models.length === 0) {
+    console.warn("[openrouter] call skipped - model is not configured (source: %s)", settings.source);
     return null;
   }
 
-  try {
-    const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey}`,
-        "HTTP-Referer": settings.siteUrl,
-        "X-Title": settings.siteName,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: opts.maxTokens ?? settings.maxTokens,
-        temperature: opts.temperature ?? settings.temperature,
-      }),
-    });
+  for (const model of models) {
+    try {
+      const res = await fetch(`${settings.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${settings.apiKey}`,
+          "HTTP-Referer": settings.siteUrl,
+          "X-Title": settings.siteName,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: opts.maxTokens ?? settings.maxTokens,
+          temperature: opts.temperature ?? settings.temperature,
+        }),
+      });
 
-    if (!res.ok) {
-      const details = await res.text().catch(() => "");
-      console.error(
-        "[openrouter] API error %d for model %s: %s",
-        res.status,
-        settings.model,
-        details.slice(0, 500),
-      );
-      return null;
+      if (!res.ok) {
+        const details = await res.text().catch(() => "");
+        console.error(
+          "[openrouter] API error %d for model %s: %s",
+          res.status,
+          model,
+          details.slice(0, 500),
+        );
+
+        if (res.status === 401 || res.status === 403) {
+          return null;
+        }
+
+        continue;
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      if (content) {
+        return content;
+      }
+    } catch (error) {
+      console.error(`[openrouter] fetch failed for model ${model}:`, error);
     }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  } catch (error) {
-    console.error("[openrouter] fetch failed:", error);
-    return null;
   }
+
+  return null;
 }
 
 /**
@@ -70,7 +88,6 @@ export async function callOpenRouter(
  */
 export function parseJsonFromAi<T = any>(text: string, fallback: T): T {
   try {
-    // Strip markdown fences if present
     const cleaned = text.replace(/```(?:json)?\s*/g, "").replace(/```\s*$/g, "");
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     const objectMatch = cleaned.match(/\{[\s\S]*\}/);

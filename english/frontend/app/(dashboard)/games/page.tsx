@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { aiApi, gamesApi } from "@/api/client";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
+import { speakEnglishText } from "@/lib/tts";
 
 interface GameWord {
   targetWord: string;
@@ -130,14 +131,8 @@ export default function GamesPage() {
     } catch { toast.error("Ошибка сохранения"); }
   };
 
-  const speak = (text: string) => {
-    if ("speechSynthesis" in window) {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US"; u.rate = 0.85;
-      const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("en"));
-      if (voices.length) u.voice = voices.find(v => v.name.includes("Google")) || voices[0];
-      window.speechSynthesis.speak(u);
-    }
+  const speak = async (text: string) => {
+    await speakEnglishText(text);
   };
 
   // ——— MENU ———

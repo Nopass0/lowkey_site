@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { grammarApi } from "@/api/client";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
+import { speakEnglishText } from "@/lib/tts";
 
 const LEVEL_CONFIG = {
   beginner:     { label: "Начинающий",  color: "text-emerald-500", bg: "bg-emerald-500/10",  border: "border-emerald-500/20" },
@@ -98,13 +99,8 @@ export default function GrammarPage() {
     finally { setExplaining(false); }
   };
 
-  const speakExample = (text: string) => {
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "en-US"; utt.rate = 0.85;
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("en"));
-    if (voices.length > 0) utt.voice = voices.find(v => v.name.includes("Google")) || voices[0];
-    window.speechSynthesis.speak(utt);
+  const speakExample = async (text: string) => {
+    await speakEnglishText(text);
   };
 
   const levelGroups = Object.entries(LEVEL_CONFIG).map(([key, cfg]) => ({

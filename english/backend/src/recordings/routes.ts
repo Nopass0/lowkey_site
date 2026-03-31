@@ -2,8 +2,6 @@ import Elysia, { t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { db } from "../db";
 import { config } from "../config";
-import { mkdir } from "fs/promises";
-import { join } from "path";
 
 async function getUser(headers: any, jwtInstance: any, set: any) {
   const token = headers.authorization?.replace("Bearer ", "");
@@ -32,9 +30,6 @@ export const recordingsRoutes = new Elysia({ prefix: "/recordings" })
     const user = await getUser(headers, jwt, set);
     if (!user) { set.status = 401; return { error: "Unauthorized" }; }
 
-    const uploadDir = join(config.uploadsDir, "recordings", user.id);
-    try { await mkdir(uploadDir, { recursive: true }); } catch {}
-
     const formData = await request.formData();
     const file = formData.get("audio") as File;
     const title = formData.get("title") as string || `Запись ${new Date().toLocaleDateString("ru")}`;
@@ -42,26 +37,29 @@ export const recordingsRoutes = new Elysia({ prefix: "/recordings" })
     const type = formData.get("type") as string || "practice";
 
     if (!file) { set.status = 400; return { error: "No audio file" }; }
-
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.webm`;
-    const filePath = join(uploadDir, filename);
-    const buffer = await file.arrayBuffer();
-    await Bun.write(filePath, buffer);
-
-    const audioUrl = `/uploads/recordings/${user.id}/${filename}`;
     const durationSeconds = parseInt(formData.get("duration") as string || "0");
 
     const recording = await db.create("EnglishRecordings", {
       userId: user.id,
       cardId: cardId || null,
       title,
-      audioUrl,
+      audioUrl: "",
       durationSeconds,
       type,
       transcription: null,
       score: null,
       feedback: null,
     });
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "webm";
+    const contentType = file.type || "audio/webm";
+    const ref = await db.uploadFile("EnglishRecordings", recording.id, "audio", await file.arrayBuffer(), {
+      filename: `${recording.id}.${ext}`,
+      contentType,
+      bucket: "english-recordings",
+    });
+    const audioUrl = await db.blobUrl("EnglishRecordings", ref);
+    const updatedRecording = await db.update("EnglishRecordings", recording.id, { audioUrl });
 
     // Update daily progress
     const today = new Date().toISOString().split("T")[0];
@@ -76,7 +74,7 @@ export const recordingsRoutes = new Elysia({ prefix: "/recordings" })
       });
     }
 
-    return recording;
+    return updatedRecording;
   })
 
   .patch("/:id", async ({ headers, params, body, jwt, set }) => {

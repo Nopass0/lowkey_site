@@ -16,6 +16,18 @@ async function getAdmin(headers: any, jwtInstance: any, set: any) {
   return user;
 }
 
+async function attachDeckOwner(deck: any) {
+  const owner = deck?.userId
+    ? await db.findOne("EnglishUsers", [db.filter.eq("id", deck.userId)])
+    : null;
+
+  return {
+    ...deck,
+    ownerName: owner?.name || "Unknown",
+    ownerEmail: owner?.email || null,
+  };
+}
+
 export const adminRoutes = new Elysia({ prefix: "/admin" })
   .use(jwt({ name: "jwt", secret: config.jwtSecret }))
 
@@ -79,6 +91,87 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
       ttsModel: t.Optional(t.String()),
       speechModel: t.Optional(t.String()),
     }),
+  })
+
+  .get("/template-decks", async ({ headers, query, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const publicOnly = query.publicOnly !== "false";
+    const filters = publicOnly ? [db.filter.eq("isPublic", true)] : [];
+    const decks = await db.findMany("EnglishDecks", {
+      filters,
+      sort: [{ field: "updatedAt", direction: "desc" }],
+      limit: parseInt(query.limit || "100"),
+    });
+    return Promise.all(decks.map(attachDeckOwner));
+  })
+
+  .patch("/template-decks/:id", async ({ headers, params, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", params.id)]);
+    if (!deck) {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+
+    const updated = await db.update("EnglishDecks", params.id, body);
+    return attachDeckOwner(updated);
+  }, {
+    body: t.Object({
+      isPublic: t.Optional(t.Boolean()),
+      category: t.Optional(t.String()),
+      name: t.Optional(t.String()),
+      description: t.Optional(t.String()),
+    }),
+  })
+
+  .get("/content-overview", async ({ headers, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+
+    const [groups, courses, tests, grammarTopics] = await Promise.all([
+      db.findMany("EnglishGroups", {
+        sort: [{ field: "createdAt", direction: "desc" }],
+        limit: 50,
+      }),
+      db.findMany("EnglishCourses", {
+        sort: [{ field: "createdAt", direction: "desc" }],
+        limit: 50,
+      }),
+      db.findMany("EnglishCourseTests", {
+        sort: [{ field: "createdAt", direction: "desc" }],
+        limit: 50,
+      }),
+      db.findMany("EnglishGrammarTopics", {
+        sort: [{ field: "updatedAt", direction: "desc" }],
+        limit: 50,
+      }),
+    ]);
+
+    const courseMap = new Map(courses.map((course) => [course.id, course]));
+    const groupMap = new Map(groups.map((group) => [group.id, group]));
+
+    return {
+      counts: {
+        groups: groups.length,
+        courses: courses.length,
+        tests: tests.length,
+        grammarTopics: grammarTopics.length,
+      },
+      groups,
+      courses: courses.map((course: any) => ({
+        ...course,
+        groupName: groupMap.get(course.groupId)?.name || null,
+      })),
+      tests: tests.map((test: any) => {
+        const course = courseMap.get(test.courseId);
+        return {
+          ...test,
+          courseTitle: course?.title || null,
+          groupId: course?.groupId || test.groupId || null,
+          groupName: groupMap.get(course?.groupId || test.groupId)?.name || null,
+        };
+      }),
+      grammarTopics,
+    };
   })
 
   .get("/users", async ({ headers, query, jwt, set }) => {

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { useCardsStore } from "@/store/cards";
 import { dictionaryApi } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { speakEnglishText } from "@/lib/tts";
 import toast from "react-hot-toast";
 
 type DictEntry = {
@@ -79,25 +80,8 @@ export default function DictionaryPage() {
     }, 300);
   };
 
-  const speakWord = (text: string, lang = "en-US") => {
-    window.speechSynthesis.cancel();
-    if (entry?.audioUrl) {
-      const audio = new Audio(entry.audioUrl);
-      audio.play().catch(() => speakTTS(text, lang));
-      return;
-    }
-    speakTTS(text, lang);
-  };
-
-  const speakTTS = (text: string, lang = "en-US") => {
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = lang;
-    utt.rate = 0.85;
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("en"));
-    if (voices.length > 0) utt.voice = voices.find(v => v.name.includes("Google") || v.name.includes("Natural")) || voices[0];
-    setSpeaking(true);
-    utt.onend = () => setSpeaking(false);
-    window.speechSynthesis.speak(utt);
+  const speakWord = async (text: string) => {
+    await speakEnglishText(text, { onStateChange: setSpeaking });
   };
 
   const saveCard = async () => {
@@ -280,7 +264,7 @@ export default function DictionaryPage() {
                         {def.example && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <span className="text-xs italic text-muted-foreground border-l-2 border-primary/20 pl-2">{def.example}</span>
-                            <button onClick={() => speakTTS(def.example!)} className="text-muted-foreground/40 hover:text-primary transition-colors flex-shrink-0">
+                        <button onClick={() => speakWord(def.example!)} className="text-muted-foreground/40 hover:text-primary transition-colors flex-shrink-0">
                               <Volume2 size={11} />
                             </button>
                           </div>
@@ -303,7 +287,7 @@ export default function DictionaryPage() {
                     <div key={i} className="p-3 bg-accent/30 rounded-xl">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-sm">{ex.en}</div>
-                        <button onClick={() => speakTTS(ex.en)} className="text-muted-foreground/50 hover:text-primary transition-colors flex-shrink-0">
+                        <button onClick={() => speakWord(ex.en)} className="text-muted-foreground/50 hover:text-primary transition-colors flex-shrink-0">
                           <Volume2 size={13} />
                         </button>
                       </div>

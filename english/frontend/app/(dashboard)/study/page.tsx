@@ -9,6 +9,7 @@ import { DIFFICULTY_LABELS, DIFFICULTY_COLORS, cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { Card } from "@/store/cards";
+import { speakEnglishText } from "@/lib/tts";
 
 export default function StudyPage() {
   const { dueCards, fetchDueCards, reviewCard, startSession, finishSession } = useCardsStore();
@@ -66,13 +67,8 @@ export default function StudyPage() {
 
   const handleFlip = () => setFlipped(!flipped);
 
-  const speakWord = (text: string) => {
-    if ("speechSynthesis" in window) {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US";
-      u.rate = 0.8;
-      window.speechSynthesis.speak(u);
-    }
+  const speakWord = async (text: string) => {
+    await speakEnglishText(text);
   };
 
   if (isLoading) return (

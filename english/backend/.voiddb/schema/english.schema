@@ -44,6 +44,7 @@ database {
     description String?
     emoji String @default("📚")
     color String @default("#6366f1")
+    cover Blob?
     imageUrl String?
     isPublic Boolean @default(false)
     cardCount Int @default(0)
@@ -63,6 +64,7 @@ database {
     footnote String?
     pronunciation String?
     audioUrl String?
+    image Blob?
     imageUrl String?
     examples Json[]
     tags Json[]
@@ -115,6 +117,7 @@ database {
     userId String
     cardId String?
     title String
+    audio Blob?
     audioUrl String
     transcription String?
     durationSeconds Int @default(0)
@@ -332,6 +335,17 @@ database {
     model String
     createdAt DateTime @default(now())
     @@map("EnglishSoundCache")
+  }
+
+  model EnglishGeneratedImages {
+    id String @id @map("_id")
+    userId String
+    prompt String
+    kind String @default("card")
+    image Blob?
+    imageUrl String?
+    createdAt DateTime @default(now())
+    @@map("EnglishGeneratedImages")
   }
 
   model EnglishGroups {

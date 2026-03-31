@@ -3,6 +3,8 @@ import { jwt } from "@elysiajs/jwt";
 import { db } from "../db";
 import { config } from "../config";
 import { sm2, getDueCards, getCardStatus, calculateXp } from "./spaced-repetition";
+import { optimizeImageUpload } from "../media";
+import { callOpenRouter, parseJsonFromAi } from "../ai/openrouter";
 
 declare const Bun: any;
 declare const Buffer: any;
@@ -141,14 +143,37 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     if (!file) { set.status = 400; return { error: "No file" }; }
 
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    if (!["jpg","jpeg","png","webp"].includes(ext)) { set.status = 400; return { error: "Invalid type" }; }
+    if (!["jpg","jpeg","png","webp","gif"].includes(ext)) { set.status = 400; return { error: "Invalid type" }; }
     if (file.size > 5 * 1024 * 1024) { set.status = 400; return { error: "Too large" }; }
 
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir("./uploads/decks", { recursive: true });
-    const filename = `${params.id}.${ext}`;
-    await Bun.write(`./uploads/decks/${filename}`, await file.arrayBuffer());
-    const imageUrl = `/uploads/decks/${filename}`;
+    let finalBuffer = Buffer.from(await file.arrayBuffer());
+    let contentType = file.type || `image/${ext}`;
+    let finalExt = ext;
+
+    if (ext !== "gif") {
+      const optimized = await optimizeImageUpload(finalBuffer, {
+        width: 960,
+        height: 640,
+        fit: "cover",
+        quality: 86,
+      });
+      finalBuffer = optimized.buffer;
+      contentType = optimized.contentType;
+      finalExt = optimized.extension;
+    }
+
+    try {
+      await db.deleteFile("EnglishDecks", params.id, "cover");
+    } catch {
+      // Ignore missing previous blob.
+    }
+
+    const ref = await db.uploadFile("EnglishDecks", params.id, "cover", finalBuffer, {
+      filename: `${params.id}.${finalExt}`,
+      contentType,
+      bucket: "english-media",
+    });
+    const imageUrl = await db.blobUrl("EnglishDecks", ref);
     return db.update("EnglishDecks", params.id, { imageUrl });
   })
 
@@ -383,7 +408,7 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
   })
 
   // === IMAGE UPLOAD ===
-  .post("/:id/upload-image", async ({ headers, params, body, jwt, set }) => {
+  .post("/:id/upload-image", async ({ headers, params, jwt, set, request }) => {
     const user = await getUser(headers, jwt, set);
     const card = await db.findOne("EnglishCards", [
       db.filter.eq("id", params.id),
@@ -391,22 +416,43 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
     ]);
     if (!card) { set.status = 404; return { error: "Not found" }; }
 
-    const { file } = body as { file: File };
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
     if (!file) { set.status = 400; return { error: "No file provided" }; }
 
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
     const allowed = ["jpg", "jpeg", "png", "webp", "gif"];
     if (!allowed.includes(ext)) { set.status = 400; return { error: "Invalid file type" }; }
 
-    const fileName = `card_${params.id}_${Date.now()}.${ext}`;
-    const filePath = `${config.uploadsDir}/cards/${fileName}`;
+    let finalBuffer = Buffer.from(await file.arrayBuffer());
+    let contentType = file.type || `image/${ext}`;
+    let finalExt = ext;
 
-    const { mkdir, writeFile } = await import("fs/promises");
-    await mkdir(`${config.uploadsDir}/cards`, { recursive: true });
-    const buffer = await file.arrayBuffer();
-    await writeFile(filePath, Buffer.from(buffer));
+    if (ext !== "gif") {
+      const optimized = await optimizeImageUpload(finalBuffer, {
+        width: 1024,
+        height: 1024,
+        fit: "inside",
+        quality: 86,
+      });
+      finalBuffer = optimized.buffer;
+      contentType = optimized.contentType;
+      finalExt = optimized.extension;
+    }
 
-    const imageUrl = `/uploads/cards/${fileName}`;
+    try {
+      await db.deleteFile("EnglishCards", params.id, "image");
+    } catch {
+      // Ignore missing previous blob.
+    }
+
+    const ref = await db.uploadFile("EnglishCards", params.id, "image", finalBuffer, {
+      filename: `card_${params.id}_${Date.now()}.${finalExt}`,
+      contentType,
+      bucket: "english-media",
+    });
+
+    const imageUrl = await db.blobUrl("EnglishCards", ref);
     await db.update("EnglishCards", params.id, { imageUrl });
     return { imageUrl };
   }, {
@@ -417,14 +463,6 @@ export const cardsRoutes = new Elysia({ prefix: "/cards" })
   .post("/generate-by-topic", async ({ headers, body, jwt, set }) => {
     const user = await getUser(headers, jwt, set);
     const { topic, count = 10, level = "intermediate", deckId } = body as any;
-
-    const { getAiSettings } = await import("../ai/settings");
-    const settings = await getAiSettings();
-
-    if (!settings.apiKey || !settings.model) {
-      set.status = 503;
-      return { error: "AI not configured" };
-    }
 
     const systemPrompt = `You are an English teacher creating high-quality flashcards for Russian learners. Return ONLY valid JSON array.`;
     const prompt = `Create ${count} English vocabulary flashcards on the topic: "${topic}".
@@ -444,33 +482,13 @@ Return JSON array:
 ]
 Make cards varied - include nouns, verbs, phrases, idioms related to the topic. Ensure IPA pronunciation is correct.`;
 
-    let cards: any[] = [];
-    try {
-      const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${settings.apiKey}`,
-          "HTTP-Referer": settings.siteUrl,
-          "X-Title": settings.siteName,
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-          max_tokens: 3000,
-          temperature: 0.7,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content || "";
-        const match = text.match(/\[[\s\S]*\]/);
-        if (match) cards = JSON.parse(match[0]);
-      }
-    } catch {}
+    const aiResponse = await callOpenRouter(prompt, systemPrompt, { maxTokens: 3000, temperature: 0.7 });
+    if (!aiResponse) {
+      set.status = 503;
+      return { error: "AI not configured" };
+    }
+
+    const cards = parseJsonFromAi<any[]>(aiResponse, []);
 
     const created = [];
     for (const c of cards.slice(0, count)) {

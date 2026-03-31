@@ -15,6 +15,7 @@ import { getCardStatusLabel, getNextReviewText, cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 import type { Card, Deck } from "@/store/cards";
 import Link from "next/link";
+import { speakEnglishText } from "@/lib/tts";
 
 // ——— Context Menu ———
 function ContextMenu({ x, y, onClose, items }: {
@@ -122,16 +123,8 @@ function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
     setCtxMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const speak = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "en-US"; utt.rate = 0.9;
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith("en"));
-    if (voices.length > 0) utt.voice = voices.find(v => v.name.includes("Google")) || voices[0];
-    setSpeaking(true);
-    utt.onend = () => setSpeaking(false);
-    window.speechSynthesis.speak(utt);
+  const speak = async (text: string) => {
+    await speakEnglishText(text, { onStateChange: setSpeaking });
   };
 
   const ctxItems = [
@@ -295,6 +288,7 @@ export default function VocabularyPage() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [aiWord, setAiWord] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [imageGenerating, setImageGenerating] = useState(false);
   const [editCard, setEditCard] = useState<Card | null>(null);
   const [newCard, setNewCard] = useState<CardDraft>({
     front: "", back: "", subtitle: "", footnote: "",
@@ -335,7 +329,7 @@ export default function VocabularyPage() {
       setAiWord("");
       setShowAddCard(true);
       toast.success("Карточка сгенерирована");
-    } catch { toast.error("Ошибка генерации"); }
+    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка генерации"); }
     finally { setAiLoading(false); }
   };
 
@@ -347,7 +341,7 @@ export default function VocabularyPage() {
       toast.success(`Создано ${result.count} карточек по теме "${aiTopic}"`);
       setShowAIGen(false); setAiTopic("");
       fetchDecks(); fetchCards(selectedDeck ? { deckId: selectedDeck } : {});
-    } catch { toast.error("Ошибка генерации"); }
+    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка генерации"); }
     finally { setBulkLoading(false); }
   };
 
@@ -358,7 +352,7 @@ export default function VocabularyPage() {
       toast.success("Набор добавлен в твою коллекцию");
       setShowTemplates(false);
       fetchCards(); 
-    } catch { toast.error("Ошибка загрузки набора"); }
+    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка загрузки набора"); }
     finally { setAdopting(null); }
   };
 
@@ -624,16 +618,27 @@ export default function VocabularyPage() {
                   <label className="text-xs text-muted-foreground mb-1 flex items-center justify-between font-medium">
                     <span>Картинка (URL)</span>
                     <button 
-                      className="text-violet-500 font-semibold flex items-center gap-1 hover:text-violet-400 transition-colors bg-violet-500/10 px-2 py-0.5 rounded-md"
-                      onClick={(e) => {
+                      className={cn(
+                        "text-violet-500 font-semibold flex items-center gap-1 bg-violet-500/10 px-2 py-0.5 rounded-md transition-colors",
+                        imageGenerating ? "opacity-70 cursor-not-allowed" : "hover:text-violet-400"
+                      )}
+                      disabled={imageGenerating}
+                      onClick={async (e) => {
                         e.preventDefault();
                         if (!newCard.front) { toast.error("Сначала введи английское слово"); return; }
-                        const prompt = `${newCard.front}. Beautiful simple minimalistic flat vector illustration, colorful, solid pastel background, no text, clean design`;
-                        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=512&height=512&nologo=true`;
-                        setNewCard({ ...newCard, imageUrl: url });
+                        setImageGenerating(true);
+                        try {
+                          const prompt = `${newCard.front}. Beautiful simple minimalistic flat vector illustration, colorful, solid pastel background, no text, clean design`;
+                          const data = await aiApi.generateImage({ prompt, kind: "card" });
+                          setNewCard((current) => ({ ...current, imageUrl: data.imageUrl }));
+                        } catch (error: any) {
+                          toast.error(error?.response?.data?.error || "Ошибка генерации картинки");
+                        } finally {
+                          setImageGenerating(false);
+                        }
                       }}
                     >
-                      <Sparkles size={10} /> AI сгенерировать бесплатно
+                      {imageGenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />} AI сгенерировать
                     </button>
                   </label>
                   <Input value={newCard.imageUrl || ""} onChange={(e) => setNewCard({ ...newCard, imageUrl: e.target.value })} placeholder="https://image.pollinations.ai/..." />

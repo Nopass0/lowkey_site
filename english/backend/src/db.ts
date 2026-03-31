@@ -168,7 +168,7 @@ export const db = {
     id: string,
     field: string,
     source: ArrayBuffer | Uint8Array,
-    options?: { filename?: string; contentType?: string },
+    options?: { filename?: string; contentType?: string; bucket?: string },
   ) {
     const handle = await getCollection(collection);
     return handle.uploadFile(id, field, source, options);
