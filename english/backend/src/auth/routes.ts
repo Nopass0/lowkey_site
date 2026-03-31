@@ -156,15 +156,20 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       if (!allowed.includes(ext)) { set.status = 400; return { error: "Invalid file type" }; }
       if (file.size > 5 * 1024 * 1024) { set.status = 400; return { error: "File too large (max 5MB)" }; }
 
-      const dir = "./uploads/avatars";
-      const { mkdir } = await import("node:fs/promises");
-      await mkdir(dir, { recursive: true });
-
       const filename = `${userId}.${ext}`;
       const buf = await file.arrayBuffer();
-      await Bun.write(`${dir}/${filename}`, buf);
 
-      const avatarUrl = `/uploads/avatars/${filename}`;
+      try {
+        await db.deleteFile("EnglishUsers", userId, "avatar");
+      } catch {
+        // Ignore missing previous blob.
+      }
+
+      const avatarRef = await db.uploadFile("EnglishUsers", userId, "avatar", buf, {
+        filename,
+        contentType: file.type || `image/${ext}`,
+      });
+      const avatarUrl = await db.blobUrl("EnglishUsers", avatarRef);
       const updated = await db.update("EnglishUsers", userId, { avatarUrl });
       const { passwordHash: _, ...safeUser } = updated;
       return safeUser;

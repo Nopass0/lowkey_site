@@ -163,6 +163,27 @@ export const db = {
     await handle.delete(id);
   },
 
+  async uploadFile(
+    collection: string,
+    id: string,
+    field: string,
+    source: ArrayBuffer | Uint8Array,
+    options?: { filename?: string; contentType?: string },
+  ) {
+    const handle = await getCollection(collection);
+    return handle.uploadFile(id, field, source, options);
+  },
+
+  async deleteFile(collection: string, id: string, field: string) {
+    const handle = await getCollection(collection);
+    await handle.deleteFile(id, field);
+  },
+
+  async blobUrl(collection: string, ref: any) {
+    const handle = await getCollection(collection);
+    return handle.blobUrl(ref);
+  },
+
   async upsert(collection: string, filters: FilterOp[], data: Record<string, any>) {
     const existing = await db.findOne(collection, filters);
     if (existing) {

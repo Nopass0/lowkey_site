@@ -16,6 +16,7 @@ database {
     email String @unique
     passwordHash String
     name String
+    avatar Blob?
     avatarUrl String?
     telegramId String?
     telegramUsername String?
