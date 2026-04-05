@@ -12,6 +12,7 @@ import {
   Search,
   Send,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -324,12 +325,14 @@ export default function AdminMailingsPage() {
     deleteGroup,
     deleteMailing,
     sendTest,
+    uploadImage,
   } = useAdminMailings();
 
   // Form state
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [imageUploading, setImageUploading] = useState(false);
   const [buttons, setButtons] = useState<MailingButton[]>([]);
   const [targetType, setTargetType] = useState<"all" | "selected" | "group">("all");
   const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAt);
@@ -489,14 +492,38 @@ export default function AdminMailingsPage() {
             {/* Image */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                <Image className="h-3 w-3" /> Изображение (URL)
+                <Image className="h-3 w-3" /> Изображение
               </label>
-              <Input
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://example.com/image.jpg"
-                className="h-11 rounded-xl border-border/60 bg-background shadow-none"
-              />
+              <div className="flex gap-2">
+                <Input
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://example.com/image.jpg или загрузите файл →"
+                  className="h-11 flex-1 rounded-xl border-border/60 bg-background shadow-none text-sm"
+                />
+                <label className={`inline-flex items-center justify-center h-11 px-4 rounded-xl border border-border/60 bg-background text-sm cursor-pointer hover:bg-accent transition-colors ${imageUploading ? "opacity-50 pointer-events-none" : ""}`}>
+                  {imageUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setImageUploading(true);
+                      try {
+                        const url = await uploadImage(file);
+                        setImageUrl(url);
+                      } catch (err) {
+                        setFeedback(err instanceof Error ? err.message : "Ошибка загрузки");
+                      } finally {
+                        setImageUploading(false);
+                        e.target.value = "";
+                      }
+                    }}
+                  />
+                </label>
+              </div>
             </div>
 
             {/* Buttons */}

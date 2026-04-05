@@ -1,4 +1,5 @@
 import Elysia, { t } from "elysia";
+import { mkdir } from "fs/promises";
 import { adminMiddleware } from "../../auth/middleware";
 import { db } from "../../db";
 import { config } from "../../config";
@@ -254,6 +255,44 @@ const buttonSchema = t.Object({
 
 export const adminMailingRoutes = new Elysia({ prefix: "/admin/mailings" })
   .use(adminMiddleware)
+
+  .post(
+    "/upload-image",
+    async ({ request, set }) => {
+      try {
+        let formData: FormData;
+        try {
+          formData = await request.formData();
+        } catch {
+          set.status = 400;
+          return { message: "Expected multipart/form-data" };
+        }
+        const file = formData.get("file") as File | null;
+        if (!file || typeof file === "string") {
+          set.status = 400;
+          return { message: "file field is required" };
+        }
+        const mime = file.type ?? "";
+        if (!mime.startsWith("image/")) {
+          set.status = 400;
+          return { message: "File must be an image" };
+        }
+        const rawExt = (file.name ?? "file").split(".").pop()?.toLowerCase() ?? "jpg";
+        const ext = ["jpg", "jpeg", "png", "gif", "webp"].includes(rawExt) ? rawExt : "jpg";
+        const filename = `${crypto.randomUUID()}.${ext}`;
+        const dir = `${config.APP_FILES_DIR}/mailings`;
+        await mkdir(dir, { recursive: true });
+        const buffer = await file.arrayBuffer();
+        await Bun.write(`${dir}/${filename}`, buffer);
+        const url = `${config.SITE_URL}/api/uploads/mailings/${filename}`;
+        return { url };
+      } catch (err) {
+        console.error("[MailingUpload] error:", err);
+        set.status = 500;
+        return { message: "Upload failed" };
+      }
+    },
+  )
 
   // ─── List mailings ────────────────────────────────────────────────────────
   .get(

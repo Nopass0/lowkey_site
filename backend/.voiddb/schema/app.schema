@@ -333,6 +333,7 @@ database {
     isActive Boolean @default(true)
     createdAt DateTime @default(now())
     createdById String?
+    updatedAt DateTime?
     @@map("vpn_blocked_domains")
   }
 
@@ -398,6 +399,8 @@ database {
     supportedProtocols Json[]
     location String @default("Unknown, UN")
     connectLinkTemplate String?
+    lastBlocklistSyncAt DateTime?
+    blocklistForceSync Boolean @default(false)
     @@map("vpn_servers")
   }
 

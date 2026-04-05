@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,7 +33,9 @@ type Blocklist struct {
 	backendSecret string
 	httpClient    *http.Client
 
-	stopCh chan struct{}
+	lastSyncTime atomic.Int64 // Unix ms of last successful refresh
+	forceCh      chan struct{} // triggers immediate refresh
+	stopCh       chan struct{}
 }
 
 // New creates a Blocklist and starts the background refresh loop.
@@ -42,11 +45,10 @@ func New(backendURL, backendSecret string) *Blocklist {
 		backendURL:    backendURL,
 		backendSecret: backendSecret,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		forceCh:       make(chan struct{}, 1),
 		stopCh:        make(chan struct{}),
 	}
-	// Initial load
 	bl.refresh()
-	// Background refresh
 	go bl.loop()
 	return bl
 }
@@ -56,10 +58,22 @@ func (bl *Blocklist) Stop() {
 	close(bl.stopCh)
 }
 
+// ForceRefresh triggers an immediate blocklist refresh (non-blocking).
+func (bl *Blocklist) ForceRefresh() {
+	select {
+	case bl.forceCh <- struct{}{}:
+	default:
+	}
+}
+
+// LastSyncTime returns the Unix millisecond timestamp of the last successful refresh.
+func (bl *Blocklist) LastSyncTime() int64 {
+	return bl.lastSyncTime.Load()
+}
+
 // IsBlocked returns the redirect URL and true if the domain (or any parent
 // domain up to the registered TLD) is blocked. Returns ("", false) otherwise.
 func (bl *Blocklist) IsBlocked(host string) (redirectURL string, blocked bool) {
-	// Strip port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
@@ -68,7 +82,6 @@ func (bl *Blocklist) IsBlocked(host string) (redirectURL string, blocked bool) {
 	bl.mu.RLock()
 	defer bl.mu.RUnlock()
 
-	// Exact match first
 	if e, ok := bl.entries[host]; ok {
 		url := e.RedirectURL
 		if url == "" {
@@ -77,7 +90,6 @@ func (bl *Blocklist) IsBlocked(host string) (redirectURL string, blocked bool) {
 		return url, true
 	}
 
-	// Check parent domains (e.g. sub.example.com -> example.com)
 	parts := strings.Split(host, ".")
 	for i := 1; i < len(parts)-1; i++ {
 		parent := strings.Join(parts[i:], ".")
@@ -107,6 +119,8 @@ func (bl *Blocklist) loop() {
 		select {
 		case <-bl.stopCh:
 			return
+		case <-bl.forceCh:
+			bl.refresh()
 		case <-ticker.C:
 			bl.refresh()
 		}
@@ -171,5 +185,6 @@ func (bl *Blocklist) refresh() {
 	bl.entries = newEntries
 	bl.mu.Unlock()
 
+	bl.lastSyncTime.Store(time.Now().UnixMilli())
 	log.Printf("[Blocklist] Loaded %d blocked domain(s)", len(newEntries))
 }

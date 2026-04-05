@@ -425,8 +425,10 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "supportedProtocols",
       "location",
       "connectLinkTemplate",
+      "lastBlocklistSyncAt",
+      "blocklistForceSync",
     ],
-    dateFields: ["deployedAt", "lastSeenAt", "createdAt"],
+    dateFields: ["deployedAt", "lastSeenAt", "createdAt", "lastBlocklistSyncAt"],
   },
   telegramMailing: {
     collection: "telegram_mailings",
@@ -625,8 +627,8 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
   },
   vpnBlockedDomain: {
     collection: "vpn_blocked_domains",
-    fields: ["id", "domain", "reason", "redirectUrl", "isActive", "createdAt", "createdById"],
-    dateFields: ["createdAt"],
+    fields: ["id", "domain", "reason", "redirectUrl", "isActive", "createdAt", "createdById", "updatedAt"],
+    dateFields: ["createdAt", "updatedAt"],
     relations: {
       createdBy: { model: "user", type: "one", localField: "createdById", foreignField: "id" },
     },
@@ -646,6 +648,7 @@ const UPDATE_TIMESTAMP_MODELS = new Set<ModelName>([
   "aiSubscription",
   "aiConversation",
   "mtprotoSettings",
+  "vpnBlockedDomain",
 ]);
 
 function isPlainObject(value: unknown): value is AnyRecord {

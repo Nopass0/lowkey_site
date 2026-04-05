@@ -265,7 +265,39 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
           },
         });
 
-        return { success: true };
+        // If server reports blocklist sync time, store it
+        if (body.blocklistSyncAt) {
+          try {
+            await db.vpnServer.update({
+              where: { id: serverId },
+              data: { lastBlocklistSyncAt: new Date(body.blocklistSyncAt) } as any,
+            });
+          } catch {}
+        }
+
+        // Read blocklistVersion (latest blocked domain modification) and forceSync flag
+        let blocklistVersion = 0;
+        let forceBlocklistSync = false;
+        try {
+          const latest = await db.vpnBlockedDomain.findFirst({
+            orderBy: { createdAt: "desc" },
+          });
+          blocklistVersion = latest?.createdAt instanceof Date
+            ? latest.createdAt.getTime()
+            : (latest?.createdAt ? new Date(latest.createdAt as string).getTime() : 0);
+
+          const serverRecord = await db.vpnServer.findUnique({ where: { id: serverId } });
+          forceBlocklistSync = Boolean((serverRecord as any)?.blocklistForceSync);
+
+          if (forceBlocklistSync) {
+            await db.vpnServer.update({
+              where: { id: serverId },
+              data: { blocklistForceSync: false } as any,
+            });
+          }
+        } catch {}
+
+        return { success: true, blocklistVersion, forceBlocklistSync };
       } catch (error) {
         console.error("[ServerHeartbeat] error:", error);
         set.status = 500;
@@ -277,6 +309,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
         serverId: t.String(),
         currentLoad: t.Number(),
         activeConnections: t.Optional(t.Number()),
+        blocklistSyncAt: t.Optional(t.Number()),
       }),
     },
   )

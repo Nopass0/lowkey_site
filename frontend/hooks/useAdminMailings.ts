@@ -110,6 +110,24 @@ export function useAdminMailings() {
     [],
   );
 
+  const uploadImage = useCallback(async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/admin/mailings/upload-image", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("admin_token") ?? "" : ""}`,
+      },
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).message ?? "Upload failed");
+    }
+    const data = await response.json();
+    return (data as any).url as string;
+  }, []);
+
   return {
     mailings,
     total,
@@ -125,5 +143,6 @@ export function useAdminMailings() {
     createMailing,
     deleteMailing,
     sendTest,
+    uploadImage,
   };
 }

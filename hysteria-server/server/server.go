@@ -375,6 +375,9 @@ func (s *Server) sendHeartbeat() {
 		"currentLoad":       int(s.activeCount.Load()),
 		"activeConnections": int(s.activeCount.Load()),
 	}
+	if s.blocklist != nil {
+		payload["blocklistSyncAt"] = s.blocklist.LastSyncTime()
+	}
 	data, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", s.cfg.BackendURL+"/servers/heartbeat", bytes.NewReader(data))
 	if err != nil {
@@ -386,8 +389,22 @@ func (s *Server) sendHeartbeat() {
 		req.Header.Set("X-Server-Secret", s.cfg.BackendSecret)
 	}
 	resp, err := s.httpClient.Do(req)
-	if err == nil {
-		resp.Body.Close()
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if s.blocklist != nil {
+		var hbResp struct {
+			BlocklistVersion   int64 `json:"blocklistVersion"`
+			ForceBlocklistSync bool  `json:"forceBlocklistSync"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&hbResp); err == nil {
+			if hbResp.ForceBlocklistSync || hbResp.BlocklistVersion > s.blocklist.LastSyncTime() {
+				log.Printf("[Heartbeat] Triggering immediate blocklist refresh (version=%d, localSync=%d)", hbResp.BlocklistVersion, s.blocklist.LastSyncTime())
+				s.blocklist.ForceRefresh()
+			}
+		}
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Shield,
   ShieldOff,
@@ -10,6 +10,8 @@ import {
   Check,
   X,
   Globe,
+  Loader2,
+  RefreshCw,
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
@@ -18,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "motion/react";
 import { useAdminBlockedDomains } from "@/hooks/useAdminBlockedDomains";
+import { apiClient } from "@/api/client";
 import type { AdminBlockedDomain } from "@/api/types";
 
 const DEFAULT_REDIRECT = "https://lowkey.su/blocked";
@@ -261,10 +264,32 @@ export default function BlockedDomainsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
   const [search, setSearch] = useState("");
+  const [syncStatus, setSyncStatus] = useState<{
+    blocklistVersion: number;
+    servers: Array<{ id: string; ip: string; hostname: string | null; lastBlocklistSyncAt: string | null; synced: boolean }>;
+  } | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
+
+  const fetchSyncStatus = useCallback(async () => {
+    setSyncLoading(true);
+    try {
+      const response = await apiClient.get<typeof syncStatus>("/admin/blocked-domains/sync-status");
+      setSyncStatus(response);
+    } catch {}
+    finally {
+      setSyncLoading(false);
+    }
+  }, []);
+
+  const forceSyncAll = useCallback(async () => {
+    await apiClient.post("/admin/blocked-domains/force-sync", {});
+    await fetchSyncStatus();
+  }, [fetchSyncStatus]);
 
   useEffect(() => {
     fetchDomains();
-  }, [fetchDomains]);
+    fetchSyncStatus();
+  }, [fetchDomains, fetchSyncStatus]);
 
   const filtered = domains.filter((d) => {
     if (filter === "active" && !d.isActive) return false;
@@ -450,6 +475,47 @@ export default function BlockedDomainsPage() {
                 </AnimatePresence>
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Sync Status */}
+      <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+            <RefreshCw size={14} className="text-zinc-400" />
+            Синхронизация VPN-серверов
+          </h2>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-zinc-400 hover:text-white"
+            onClick={forceSyncAll}
+            disabled={syncLoading}
+          >
+            {syncLoading ? <Loader2 size={12} className="mr-1 animate-spin" /> : <RefreshCw size={12} className="mr-1" />}
+            Принудительная синхронизация
+          </Button>
+        </div>
+        {!syncStatus ? (
+          <div className="text-xs text-zinc-500">Загрузка...</div>
+        ) : syncStatus.servers.length === 0 ? (
+          <div className="text-xs text-zinc-500">Нет онлайн-серверов</div>
+        ) : (
+          <div className="space-y-2">
+            {syncStatus.servers.map((srv) => (
+              <div key={srv.id} className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${srv.synced ? "bg-green-400" : "bg-amber-400"}`} />
+                  <span className="font-mono text-zinc-300">{srv.hostname ?? srv.ip}</span>
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {srv.lastBlocklistSyncAt
+                    ? `Синхр. ${new Date(srv.lastBlocklistSyncAt).toLocaleString("ru")}`
+                    : "Не синхронизирован"}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

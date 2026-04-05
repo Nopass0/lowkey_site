@@ -131,7 +131,67 @@ export const adminBlockedDomainRoutes = new Elysia({ prefix: "/admin/blocked-dom
       }
     },
     { params: t.Object({ id: t.String() }) },
-  );
+  )
+
+  .get("/sync-status", async ({ set }) => {
+    try {
+      // Get the latest modification time across all blocked domains as blocklistVersion
+      const allDomains = await db.vpnBlockedDomain.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      });
+      const blocklistVersion = allDomains[0]?.createdAt instanceof Date
+        ? allDomains[0].createdAt.getTime()
+        : (allDomains[0]?.createdAt ? new Date(allDomains[0].createdAt as string).getTime() : 0);
+
+      const servers = await db.vpnServer.findMany({
+        where: { status: "online" },
+        select: {
+          id: true,
+          ip: true,
+          hostname: true,
+          lastBlocklistSyncAt: true,
+          status: true,
+        } as any,
+      });
+
+      return {
+        blocklistVersion,
+        servers: (servers as any[]).map((s: any) => ({
+          id: s.id,
+          ip: s.ip,
+          hostname: s.hostname ?? null,
+          lastBlocklistSyncAt: s.lastBlocklistSyncAt instanceof Date
+            ? s.lastBlocklistSyncAt.toISOString()
+            : (s.lastBlocklistSyncAt ?? null),
+          synced: s.lastBlocklistSyncAt
+            ? (s.lastBlocklistSyncAt instanceof Date
+                ? s.lastBlocklistSyncAt.getTime()
+                : new Date(s.lastBlocklistSyncAt as string).getTime()) >= blocklistVersion
+            : false,
+        })),
+      };
+    } catch (error) {
+      console.error("[BlockedDomains] Sync status error", error);
+      set.status = 500;
+      return { message: "Internal server error" };
+    }
+  })
+
+  .post("/force-sync", async ({ set }) => {
+    try {
+      // Set blocklistForceSync=true on all online servers
+      await db.vpnServer.updateMany({
+        where: { status: "online" },
+        data: { blocklistForceSync: true } as any,
+      });
+      return { ok: true };
+    } catch (error) {
+      console.error("[BlockedDomains] Force sync error", error);
+      set.status = 500;
+      return { message: "Internal server error" };
+    }
+  });
 
 // Public endpoint for hysteria server to fetch active blocked domains
 export const blockedDomainsPublicRoutes = new Elysia({ prefix: "/vpn" })
