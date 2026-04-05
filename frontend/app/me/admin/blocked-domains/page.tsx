@@ -164,7 +164,7 @@ function DomainRow({
 
 // ─── Add Form ─────────────────────────────────────────────────────────────────
 
-function AddForm({ onAdd }: { onAdd: (payload: { domain: string; reason?: string | null; redirectUrl?: string | null }) => Promise<void> }) {
+function AddForm({ onAdd }: { onAdd: (payload: { domain: string; reason?: string | null; redirectUrl?: string | null }) => Promise<unknown> }) {
   const [domain, setDomain] = useState("");
   const [reason, setReason] = useState("");
   const [redirectUrl, setRedirectUrl] = useState("");
