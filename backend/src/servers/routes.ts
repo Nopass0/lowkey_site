@@ -163,6 +163,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
               serverType,
               status: "online",
               lastSeenAt: new Date(),
+              ...(existing.deployStatus === "not_deployed" ? { deployStatus: "deployed" } : {}),
             },
           });
           return { success: true, serverId: updated.id };

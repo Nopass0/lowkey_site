@@ -290,9 +290,10 @@ database {
     id String @id @map("_id")
     title String
     message String
-    buttonText String?
-    buttonUrl String?
+    imageUrl String?
+    buttons Json[]
     targetType String
+    recipientGroupId String?
     selectedUserIds Json[]
     status String @default("scheduled")
     scheduledAt DateTime
@@ -301,11 +302,38 @@ database {
     targetCount Int @default(0)
     sentCount Int @default(0)
     failedCount Int @default(0)
+    blockedCount Int @default(0)
+    clickCount Int @default(0)
+    deliveredUserIds Json[]
+    failedUserIds Json[]
+    blockedUserIds Json[]
     lastError String?
     createdAt DateTime @default(now())
     updatedAt DateTime
     createdById String?
     @@map("telegram_mailings")
+  }
+
+  model LowkeyMailingRecipientGroups {
+    id String @id @map("_id")
+    name String
+    conditions Json
+    estimatedCount Int @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime
+    createdById String?
+    @@map("mailing_recipient_groups")
+  }
+
+  model LowkeyVpnBlockedDomains {
+    id String @id @map("_id")
+    domain String
+    reason String?
+    redirectUrl String?
+    isActive Boolean @default(true)
+    createdAt DateTime @default(now())
+    createdById String?
+    @@map("vpn_blocked_domains")
   }
 
   model LowkeyTransactions {

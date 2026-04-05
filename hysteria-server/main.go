@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/lowkey/hysteria-server/blocklist"
 	"github.com/lowkey/hysteria-server/captive"
 	"github.com/lowkey/hysteria-server/config"
 	"github.com/lowkey/hysteria-server/mtproto"
@@ -51,7 +52,10 @@ func main() {
 	tracker := stats.New(cfg.BackendURL, cfg.BackendSecret, cfg.DomainFlushInterval)
 	defer tracker.Stop()
 
-	vpnSrv := server.New(cfg, db, tracker)
+	bl := blocklist.New(cfg.BackendURL, cfg.BackendSecret)
+	defer bl.Stop()
+
+	vpnSrv := server.New(cfg, db, tracker, bl)
 
 	httpPortal := captive.NewHTTP(cfg.CaptivePortalListen, cfg.CaptivePortalURL)
 	httpPortal.Start()

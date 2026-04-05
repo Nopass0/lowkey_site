@@ -866,13 +866,19 @@ export interface AdminMailingRecipient {
   joinedAt: string;
 }
 
+export interface MailingButton {
+  text: string;
+  url?: string | null;
+}
+
 export interface AdminMailingItem {
   id: string;
   title: string;
   message: string;
-  buttonText: string | null;
-  buttonUrl: string | null;
-  targetType: "all" | "selected";
+  imageUrl: string | null;
+  buttons: MailingButton[];
+  targetType: "all" | "selected" | "group";
+  recipientGroupId: string | null;
   selectedUserIds: string[];
   status: "scheduled" | "processing" | "sent" | "failed";
   scheduledAt: string;
@@ -881,21 +887,52 @@ export interface AdminMailingItem {
   targetCount: number;
   sentCount: number;
   failedCount: number;
+  blockedCount: number;
+  clickCount: number;
+  deliveredUserIds: string[];
+  failedUserIds: string[];
+  blockedUserIds: string[];
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
-  createdBy: {
-    id: string;
-    login: string;
-  } | null;
+  createdBy: { id: string; login: string } | null;
+  // Enriched from GET /:id
+  deliveredUsers?: { id: string; login: string }[];
+  failedUsers?: { id: string; login: string }[];
+  blockedUsers?: { id: string; login: string }[];
+}
+
+export interface AdminMailingRecipientGroup {
+  id: string;
+  name: string;
+  conditions: MailingGroupCondition[];
+  estimatedCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailingGroupCondition {
+  field: "subscriptionActive" | "plan" | "joinedAfter" | "joinedBefore" | "minBalance" | "maxBalance";
+  value: string | boolean | number;
 }
 
 export interface AdminCreateMailingRequest {
   title: string;
   message: string;
-  buttonText?: string;
-  buttonUrl?: string;
-  targetType: "all" | "selected";
-  selectedUserIds: string[];
+  imageUrl?: string | null;
+  buttons?: MailingButton[];
+  targetType: "all" | "selected" | "group";
+  selectedUserIds?: string[];
+  recipientGroupId?: string | null;
   scheduledAt: string;
+}
+
+export interface AdminBlockedDomain {
+  id: string;
+  domain: string;
+  reason: string | null;
+  redirectUrl: string | null;
+  isActive: boolean;
+  createdAt: string;
+  createdById: string | null;
 }

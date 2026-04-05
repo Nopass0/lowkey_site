@@ -32,6 +32,10 @@ import {
   adminMailingRoutes,
   processPendingMailings,
 } from "./admin/mailings/routes";
+import {
+  adminBlockedDomainRoutes,
+  blockedDomainsPublicRoutes,
+} from "./admin/blocked-domains/routes";
 import { vpnServerRoutes } from "./servers/routes";
 import { aiRoutes } from "./ai/routes";
 
@@ -275,6 +279,8 @@ const app = new Elysia()
   .use(adminTariffRoutes)
   .use(adminYokassaRoutes)
   .use(adminMailingRoutes)
+  .use(adminBlockedDomainRoutes)
+  .use(blockedDomainsPublicRoutes)
   .use(vpnServerRoutes)
   .use(aiRoutes)
 

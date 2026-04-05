@@ -59,6 +59,8 @@ export interface PrismaLikeClient {
   vpnServer: PrismaDelegate;
   telegramMailing: PrismaDelegate;
   telegramMailingAction: PrismaDelegate;
+  mailingRecipientGroup: PrismaDelegate;
+  vpnBlockedDomain: PrismaDelegate;
   aiSettings: PrismaDelegate;
   aiSubscription: PrismaDelegate;
   aiConversation: PrismaDelegate;
@@ -96,6 +98,8 @@ type ModelName =
   | "vpnServer"
   | "telegramMailing"
   | "telegramMailingAction"
+  | "mailingRecipientGroup"
+  | "vpnBlockedDomain"
   | "aiSettings"
   | "aiSubscription"
   | "aiConversation"
@@ -430,9 +434,10 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "id",
       "title",
       "message",
-      "buttonText",
-      "buttonUrl",
+      "imageUrl",
+      "buttons",
       "targetType",
+      "recipientGroupId",
       "selectedUserIds",
       "status",
       "scheduledAt",
@@ -441,6 +446,11 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "targetCount",
       "sentCount",
       "failedCount",
+      "blockedCount",
+      "clickCount",
+      "deliveredUserIds",
+      "failedUserIds",
+      "blockedUserIds",
       "lastError",
       "createdAt",
       "updatedAt",
@@ -449,6 +459,7 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
     dateFields: ["scheduledAt", "processingAt", "sentAt", "createdAt", "updatedAt"],
     relations: {
       createdBy: { model: "user", type: "one", localField: "createdById", foreignField: "id" },
+      recipientGroup: { model: "mailingRecipientGroup", type: "one", localField: "recipientGroupId", foreignField: "id" },
     },
   },
   telegramMailingAction: {
@@ -604,6 +615,22 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
     fields: ["id", "enabled", "port", "secret", "adTag", "channelUsername", "botUsername", "addChannelOnConnect", "createdAt", "updatedAt"],
     dateFields: ["createdAt", "updatedAt"],
   },
+  mailingRecipientGroup: {
+    collection: "mailing_recipient_groups",
+    fields: ["id", "name", "conditions", "estimatedCount", "createdAt", "updatedAt", "createdById"],
+    dateFields: ["createdAt", "updatedAt"],
+    relations: {
+      createdBy: { model: "user", type: "one", localField: "createdById", foreignField: "id" },
+    },
+  },
+  vpnBlockedDomain: {
+    collection: "vpn_blocked_domains",
+    fields: ["id", "domain", "reason", "redirectUrl", "isActive", "createdAt", "createdById"],
+    dateFields: ["createdAt"],
+    relations: {
+      createdBy: { model: "user", type: "one", localField: "createdById", foreignField: "id" },
+    },
+  },
 };
 
 const UPDATE_TIMESTAMP_MODELS = new Set<ModelName>([
@@ -614,6 +641,7 @@ const UPDATE_TIMESTAMP_MODELS = new Set<ModelName>([
   "supportTicket",
   "telegramMailing",
   "telegramMailingAction",
+  "mailingRecipientGroup",
   "aiSettings",
   "aiSubscription",
   "aiConversation",
@@ -771,10 +799,6 @@ function withCreateDefaults(model: ModelName, data: AnyRecord): AnyRecord {
   const now = new Date();
   const defaults: AnyRecord = {};
 
-  if (data.id == null) {
-    defaults.id = crypto.randomUUID();
-  }
-
   switch (model) {
     case "user":
       Object.assign(defaults, {
@@ -910,13 +934,33 @@ function withCreateDefaults(model: ModelName, data: AnyRecord): AnyRecord {
       break;
     case "telegramMailing":
       Object.assign(defaults, {
+        buttons: [],
         selectedUserIds: [],
+        deliveredUserIds: [],
+        failedUserIds: [],
+        blockedUserIds: [],
         status: "scheduled",
         targetCount: 0,
         sentCount: 0,
         failedCount: 0,
+        blockedCount: 0,
+        clickCount: 0,
         createdAt: now,
         updatedAt: now,
+      });
+      break;
+    case "mailingRecipientGroup":
+      Object.assign(defaults, {
+        conditions: [],
+        estimatedCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      break;
+    case "vpnBlockedDomain":
+      Object.assign(defaults, {
+        isActive: true,
+        createdAt: now,
       });
       break;
     case "telegramMailingAction":
@@ -990,7 +1034,11 @@ function withCreateDefaults(model: ModelName, data: AnyRecord): AnyRecord {
       break;
   }
 
-  return { ...defaults, ...data };
+  const result = { ...defaults, ...data };
+  if (result.id == null) {
+    result.id = crypto.randomUUID();
+  }
+  return result;
 }
 
 function withUpdateDefaults(model: ModelName, data: AnyRecord): AnyRecord {
@@ -1435,9 +1483,10 @@ async function fetchRows(model: ModelName, args: QueryArgs = {}, options?: { ign
   if (fullyServerFilterable && orderBy?.length) {
     spec.order_by = orderBy;
   }
+  let serverPaginated = false;
   if (fullyServerFilterable && !options?.ignorePagination) {
-    if (args.skip != null) spec.skip = args.skip;
-    if (args.take != null) spec.limit = args.take;
+    if (args.skip != null) { spec.skip = args.skip; serverPaginated = true; }
+    if (args.take != null) { spec.limit = args.take; serverPaginated = true; }
   }
 
   const rawRows = await collection.find(Object.keys(spec).length ? spec : undefined);
@@ -1458,7 +1507,7 @@ async function fetchRows(model: ModelName, args: QueryArgs = {}, options?: { ign
     rows = sortRows(rows, args.orderBy);
   }
 
-  if (!options?.ignorePagination) {
+  if (!options?.ignorePagination && !serverPaginated) {
     rows = paginateRows(rows, args.skip, args.take);
   }
 
@@ -1850,6 +1899,8 @@ class VoidPrismaClient implements PrismaLikeClient {
   vpnServer = new VoidPrismaDelegate("vpnServer");
   telegramMailing = new VoidPrismaDelegate("telegramMailing");
   telegramMailingAction = new VoidPrismaDelegate("telegramMailingAction");
+  mailingRecipientGroup = new VoidPrismaDelegate("mailingRecipientGroup");
+  vpnBlockedDomain = new VoidPrismaDelegate("vpnBlockedDomain");
   aiSettings = new VoidPrismaDelegate("aiSettings");
   aiSubscription = new VoidPrismaDelegate("aiSubscription");
   aiConversation = new VoidPrismaDelegate("aiConversation");

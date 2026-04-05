@@ -56,6 +56,12 @@ const adminNav = [
 ];
 
 adminNav.splice(adminNav.length - 1, 0, {
+  title: "Блокировки",
+  url: "/me/admin/blocked-domains",
+  icon: Shield,
+});
+
+adminNav.splice(adminNav.length - 1, 0, {
   title: "Рассылки",
   url: "/me/admin/mailings",
   icon: Send,

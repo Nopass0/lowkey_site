@@ -6,6 +6,8 @@ import type {
   AdminCreateMailingRequest,
   AdminMailingItem,
   AdminMailingRecipient,
+  AdminMailingRecipientGroup,
+  MailingGroupCondition,
   PaginatedResponse,
 } from "@/api/types";
 
@@ -14,6 +16,7 @@ export function useAdminMailings() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [groups, setGroups] = useState<AdminMailingRecipientGroup[]>([]);
 
   const fetchMailings = useCallback(async (page = 1, pageSize = 10) => {
     setIsLoading(true);
@@ -29,13 +32,41 @@ export function useAdminMailings() {
     }
   }, []);
 
+  const fetchMailing = useCallback(async (id: string) => {
+    return apiClient.get<AdminMailingItem>(`/admin/mailings/${id}`);
+  }, []);
+
   const searchRecipients = useCallback(async (search: string) => {
     const response = await apiClient.get<{ items: AdminMailingRecipient[] }>(
       "/admin/mailings/recipients",
       search ? { search } : undefined,
     );
-
     return response.items;
+  }, []);
+
+  const fetchGroups = useCallback(async () => {
+    const response = await apiClient.get<{ items: AdminMailingRecipientGroup[] }>(
+      "/admin/mailings/groups",
+    );
+    setGroups(response.items);
+    return response.items;
+  }, []);
+
+  const createGroup = useCallback(
+    async (name: string, conditions: MailingGroupCondition[]) => {
+      const created = await apiClient.post<AdminMailingRecipientGroup>(
+        "/admin/mailings/groups",
+        { name, conditions },
+      );
+      setGroups((prev) => [created, ...prev]);
+      return created;
+    },
+    [],
+  );
+
+  const deleteGroup = useCallback(async (id: string) => {
+    await apiClient.delete(`/admin/mailings/groups/${id}`);
+    setGroups((prev) => prev.filter((g) => g.id !== id));
   }, []);
 
   const createMailing = useCallback(
@@ -56,10 +87,18 @@ export function useAdminMailings() {
     [],
   );
 
+  const deleteMailing = useCallback(async (id: string) => {
+    await apiClient.delete(`/admin/mailings/${id}`);
+    setMailings((prev) => prev.filter((m) => m.id !== id));
+    setTotal((prev) => Math.max(0, prev - 1));
+  }, []);
+
   const sendTest = useCallback(
-    async (payload: Pick<AdminCreateMailingRequest, "title" | "message"> & {
-      buttonText?: string;
-      buttonUrl?: string;
+    async (payload: {
+      title: string;
+      message: string;
+      imageUrl?: string | null;
+      buttons?: { text: string; url?: string | null }[];
     }) => {
       setIsSubmitting(true);
       try {
@@ -76,9 +115,15 @@ export function useAdminMailings() {
     total,
     isLoading,
     isSubmitting,
+    groups,
     fetchMailings,
+    fetchMailing,
     searchRecipients,
+    fetchGroups,
+    createGroup,
+    deleteGroup,
     createMailing,
+    deleteMailing,
     sendTest,
   };
 }

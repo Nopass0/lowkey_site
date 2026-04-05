@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lowkey/hysteria-server/blocklist"
 	"github.com/lowkey/hysteria-server/config"
 	"github.com/lowkey/hysteria-server/stats"
 	"github.com/lowkey/hysteria-server/voiddb"
@@ -64,9 +65,10 @@ type session struct {
 
 // Server is the VPN server core.
 type Server struct {
-	cfg     *config.Config
-	db      *voiddb.Client
-	tracker *stats.Tracker
+	cfg       *config.Config
+	db        *voiddb.Client
+	tracker   *stats.Tracker
+	blocklist *blocklist.Blocklist
 
 	activeSessions sync.Map // sessionID -> *session
 	activeCount    atomic.Int64
@@ -78,11 +80,12 @@ type Server struct {
 }
 
 // New creates a new Server.
-func New(cfg *config.Config, db *voiddb.Client, tracker *stats.Tracker) *Server {
+func New(cfg *config.Config, db *voiddb.Client, tracker *stats.Tracker, bl *blocklist.Blocklist) *Server {
 	return &Server{
 		cfg:            cfg,
 		db:             db,
 		tracker:        tracker,
+		blocklist:      bl,
 		sessionsByConn: make(map[string][]*session),
 		sessionsByUser: make(map[string][]*session),
 		httpClient:     &http.Client{Timeout: 5 * time.Second},
@@ -428,6 +431,17 @@ func (s *Server) HandleTCPStream(conn net.Conn, targetAddr string, userID string
 		return
 	}
 
+	// ─ Domain blocklist ────────────────────────────────────────────────────
+	if s.blocklist != nil {
+		if redirectURL, blocked := s.blocklist.IsBlocked(host); blocked {
+			if portStr == "80" || portStr == "8080" || portStr == "8000" || portStr == "" {
+				s.serveBlockedHTTPRedirect(conn, redirectURL)
+			}
+			// For HTTPS and other ports just drop the connection
+			return
+		}
+	}
+
 	// ─ Normal proxy ────────────────────────────────────────────────────────
 	dst, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
 	if err != nil {
@@ -464,6 +478,21 @@ func (s *Server) serveHTTPRedirect(conn net.Conn) {
 	body := captiveHTML(billingURL)
 	resp := "HTTP/1.1 302 Found\r\n" +
 		"Location: " + billingURL + "\r\n" +
+		"Content-Type: text/html; charset=utf-8\r\n" +
+		fmt.Sprintf("Content-Length: %d\r\n", len(body)) +
+		"Connection: close\r\n\r\n" + body
+	conn.Write([]byte(resp))
+}
+
+// serveBlockedHTTPRedirect sends an HTTP 302 to the blocked-domain redirect URL.
+func (s *Server) serveBlockedHTTPRedirect(conn net.Conn, redirectURL string) {
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4096)
+	conn.Read(buf) // drain the HTTP request
+
+	body := captiveHTML(redirectURL)
+	resp := "HTTP/1.1 302 Found\r\n" +
+		"Location: " + redirectURL + "\r\n" +
 		"Content-Type: text/html; charset=utf-8\r\n" +
 		fmt.Sprintf("Content-Length: %d\r\n", len(body)) +
 		"Connection: close\r\n\r\n" + body
