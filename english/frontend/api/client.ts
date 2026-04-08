@@ -178,6 +178,16 @@ export const socialApi = {
   getGroupProgress: (groupId: string) => apiClient.get(`/social/groups/${groupId}/progress`).then(r => r.data),
   markBlockComplete: (groupId: string, courseId: string, blockId: string) => apiClient.post(`/social/groups/${groupId}/courses/${courseId}/progress/mark-block`, { blockId }).then(r => r.data),
   aiGenerateBlocks: (groupId: string, courseId: string, data: any) => apiClient.post(`/social/groups/${groupId}/courses/${courseId}/ai-generate-blocks`, data).then(r => r.data),
+  getPublicCourses: (params?: { search?: string; level?: string; page?: number; limit?: number }) =>
+    apiClient.get("/social/public/courses", { params }).then(r => r.data),
+  getPublicCourse: (groupId: string, courseId: string) =>
+    apiClient.get(`/social/public/courses/${groupId}/${courseId}`).then(r => r.data),
+  getPublicTests: (params?: { search?: string; level?: string; page?: number; limit?: number }) =>
+    apiClient.get("/social/public/tests", { params }).then(r => r.data),
+  uploadMedia: (file: File) => {
+    const fd = new FormData(); fd.append("file", file);
+    return apiClient.post("/social/upload", fd, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data as { url: string; isImage: boolean; isVideo: boolean });
+  },
 };
 
 // Admin
@@ -198,4 +208,14 @@ export const adminApi = {
   updatePlan: (id: string, data: any) => apiClient.patch(`/admin/plans/${id}`, data).then((r) => r.data),
   getRevenue: (params?: any) => apiClient.get("/admin/revenue", { params }).then((r) => r.data),
   broadcast: (data: any) => apiClient.post("/admin/broadcast", data).then((r) => r.data),
+  getAdminTests: () => apiClient.get("/admin/tests").then(r => r.data),
+  createAdminTest: (data: any) => apiClient.post("/admin/tests", data).then(r => r.data),
+  updateAdminTest: (id: string, data: any) => apiClient.patch(`/admin/tests/${id}`, data).then(r => r.data),
+  deleteAdminTest: (id: string) => apiClient.delete(`/admin/tests/${id}`).then(r => r.data),
+  createTemplateDeck: (data: any) => apiClient.post("/admin/template-decks", data).then(r => r.data),
+  deleteTemplateDeck: (id: string) => apiClient.delete(`/admin/template-decks/${id}`).then(r => r.data),
+  getDeckCards: (deckId: string) => apiClient.get(`/admin/template-decks/${deckId}/cards`).then(r => r.data),
+  addDeckCard: (deckId: string, data: any) => apiClient.post(`/admin/template-decks/${deckId}/cards`, data).then(r => r.data),
+  updateDeckCard: (deckId: string, cardId: string, data: any) => apiClient.patch(`/admin/template-decks/${deckId}/cards/${cardId}`, data).then(r => r.data),
+  deleteDeckCard: (deckId: string, cardId: string) => apiClient.delete(`/admin/template-decks/${deckId}/cards/${cardId}`).then(r => r.data),
 };

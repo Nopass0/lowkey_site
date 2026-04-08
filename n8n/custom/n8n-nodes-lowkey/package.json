@@ -1,0 +1,34 @@
+{
+  "name": "@lowkey/n8n-nodes-lowkey",
+  "version": "0.1.0",
+  "description": "Private n8n nodes for VoidDB and OpenAI-compatible chat endpoints.",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "voiddb",
+    "openai",
+    "bitnet",
+    "bitllm"
+  ],
+  "license": "MIT",
+  "main": "index.js",
+  "files": [
+    "dist",
+    "index.js",
+    "README.md"
+  ],
+  "dependencies": {
+    "@voiddb/orm": "^1.2.3"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/LowkeyVoidDbApi.credentials.js",
+      "dist/credentials/LowkeyOpenAiCompatibleApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Lowkey/VoidDb.node.js",
+      "dist/nodes/Lowkey/OpenAiCompatibleChat.node.js"
+    ]
+  }
+}

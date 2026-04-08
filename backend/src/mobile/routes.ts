@@ -7,7 +7,7 @@ import Elysia from "elysia";
 import { db } from "../db";
 import { authMiddleware } from "../auth/middleware";
 
-export const mobileVpnRoutes = new Elysia({ prefix: "/api/vpn" })
+export const mobileVpnRoutes = new Elysia({ prefix: "/vpn" })
   .use(authMiddleware)
   .get("/blocked-domains", async () => {
     const items = await db.vpnBlockedDomain.findMany({

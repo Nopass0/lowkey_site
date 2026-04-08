@@ -1,52 +1,211 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+
+import {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  ChangeEvent,
+} from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, Search, Trash2, Edit2, Wand2, Grid, List,
-  X, Check, Sparkles, Volume2, BookOpen, Loader2,
-  Copy, Play, FolderPlus, Upload, Library, Download
+  Plus,
+  Search,
+  Trash2,
+  Edit2,
+  Wand2,
+  Grid,
+  List,
+  X,
+  Check,
+  ChevronRight,
+  ChevronDown,
+  Sparkles,
+  Volume2,
+  Loader2,
+  Copy,
+  Upload,
+  Image as ImageIcon,
+  MoreHorizontal,
+  ChevronLeft,
+  Layers,
+  ArrowRight,
+  BookOpen,
+  Zap,
+  RotateCcw,
+  Play,
+  Brain,
+  Trophy,
+  Shuffle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCardsStore } from "@/store/cards";
-import { useAuthStore } from "@/store/auth";
 import { aiApi, cardsApi } from "@/api/client";
 import { getCardStatusLabel, getNextReviewText, cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 import type { Card, Deck } from "@/store/cards";
-import Link from "next/link";
 import { speakEnglishText } from "@/lib/tts";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { useDroppable } from "@dnd-kit/core";
+import { useDraggable } from "@dnd-kit/core";
 
-// ——— Context Menu ———
-function ContextMenu({ x, y, onClose, items }: {
-  x: number; y: number; onClose: () => void;
-  items: Array<{ label: string; icon: any; action: () => void; danger?: boolean }>
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type ViewMode = "grid" | "list";
+type StatusFilter = "all" | "new" | "learning" | "review" | "mastered";
+type SortMode = "newest" | "oldest" | "alphabetical" | "next-review";
+
+interface ContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  items: ContextMenuItem[];
+}
+
+interface ContextMenuItem {
+  label: string;
+  icon: React.ElementType;
+  action: () => void;
+  danger?: boolean;
+  submenu?: ContextMenuItem[];
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, string> = {
+  new: "bg-blue-500/15 text-blue-400 border border-blue-500/20",
+  learning: "bg-amber-500/15 text-amber-400 border border-amber-500/20",
+  review: "bg-violet-500/15 text-violet-400 border border-violet-500/20",
+  mastered: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20",
+};
+
+const EMOJI_LIST = [
+  "📚","🎯","🧠","💡","🌍","🗣️","✍️","📖","🔥","⭐",
+  "🎓","🌱","🏆","💬","🎧","📝","🔤","🌐","🎨","🚀",
+];
+const COLOR_LIST = [
+  "#6366f1","#8b5cf6","#ec4899","#f43f5e","#f97316",
+  "#eab308","#22c55e","#14b8a6","#06b6d4","#3b82f6",
+];
+
+function getContrastColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 128 ? "#000" : "#fff";
+}
+
+function positionNearElement(
+  el: HTMLElement,
+  menuW = 200,
+  menuH = 250
+): { x: number; y: number } {
+  const rect = el.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let x = rect.right + 4;
+  let y = rect.top;
+  if (x + menuW > vw) x = rect.left - menuW - 4;
+  if (y + menuH > vh) y = Math.max(8, vh - menuH - 8);
+  x = Math.max(8, x);
+  return { x, y };
+}
+
+// ─── Context Menu ─────────────────────────────────────────────────────────────
+
+function ContextMenu({
+  state,
+  onClose,
+}: {
+  state: ContextMenuState;
+  onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [submenuIndex, setSubmenuIndex] = useState<number | null>(null);
+
   useEffect(() => {
+    if (!state.visible) return;
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+  }, [state.visible, onClose]);
+
+  if (!state.visible) return null;
 
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, scale: 0.92 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.92 }}
+      initial={{ opacity: 0, scale: 0.93, y: -4 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.93, y: -4 }}
       transition={{ duration: 0.1 }}
-      className="context-menu fixed"
-      style={{ top: y, left: x }}
+      className="fixed z-[9999] min-w-[180px] rounded-xl shadow-2xl shadow-black/50 py-1"
+      style={{ top: state.y, left: state.x, background: "rgba(13,13,22,0.96)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)" }}
+      onContextMenu={(e) => e.preventDefault()}
     >
-      {items.map((item, i) => {
+      {state.items.map((item, i) => {
         const Icon = item.icon;
+        const hasSub = item.submenu && item.submenu.length > 0;
         return (
-          <div key={i} onClick={() => { item.action(); onClose(); }}
-            className={cn("context-menu-item", item.danger && "danger")}>
-            <Icon size={13} />{item.label}
+          <div key={i} className="relative">
+            <div
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer select-none transition-colors",
+                item.danger
+                  ? "text-red-400 hover:bg-red-500/10"
+                  : "text-neutral-200 hover:bg-white/[0.06]",
+                hasSub && "pr-6"
+              )}
+              onMouseEnter={() => setSubmenuIndex(hasSub ? i : null)}
+              onMouseLeave={() => !hasSub && setSubmenuIndex(null)}
+              onClick={() => {
+                if (!hasSub) {
+                  item.action();
+                  onClose();
+                }
+              }}
+            >
+              <Icon size={13} className="shrink-0 opacity-70" />
+              <span className="flex-1">{item.label}</span>
+              {hasSub && <ChevronRight size={12} className="absolute right-2 opacity-50" />}
+            </div>
+            {hasSub && submenuIndex === i && (
+              <motion.div
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="absolute left-full top-0 ml-1 min-w-[160px] rounded-xl border border-white/10 shadow-2xl shadow-black/50 py-1 z-[10000]"
+              >
+                {item.submenu!.map((sub, j) => {
+                  const SubIcon = sub.icon;
+                  return (
+                    <div
+                      key={j}
+                      className="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-200 hover:bg-white/[0.06] cursor-pointer select-none transition-colors"
+                      onClick={() => {
+                        sub.action();
+                        onClose();
+                      }}
+                    >
+                      <SubIcon size={13} className="shrink-0 opacity-70" />
+                      <span>{sub.label}</span>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            )}
           </div>
         );
       })}
@@ -54,821 +213,1844 @@ function ContextMenu({ x, y, onClose, items }: {
   );
 }
 
-// ——— Deck Card ———
-function DeckCard({ deck, isSelected, onSelect, onUploadImage }: {
-  deck: Deck; isSelected: boolean;
-  onSelect: () => void; onUploadImage: (id: string) => void;
+// ─── New Deck Modal ───────────────────────────────────────────────────────────
+
+function NewDeckModal({
+  onClose,
+  onSave,
+  initial,
+}: {
+  onClose: () => void;
+  onSave: (data: { name: string; emoji: string; color: string; description: string }) => Promise<void>;
+  initial?: { name: string; emoji: string; color: string; description: string };
 }) {
-  const color = deck.color || "#6366f1";
+  const [name, setName] = useState(initial?.name ?? "");
+  const [emoji, setEmoji] = useState(initial?.emoji ?? "📚");
+  const [color, setColor] = useState(initial?.color ?? COLOR_LIST[0]);
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [saving, setSaving] = useState(false);
+
   return (
     <motion.div
-      whileTap={{ scale: 0.97 }}
-      onClick={onSelect}
-      className={cn(
-        "group relative flex-shrink-0 w-48 h-20 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200",
-        isSelected ? "ring-2 ring-primary shadow-lg shadow-primary/15" : "hover:shadow-md"
-      )}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      {/* Color/image left half */}
-      <div className="absolute inset-0 flex">
-        <div className="w-16 flex-shrink-0 flex items-center justify-center text-2xl"
-          style={{ background: `${color}30` }}>
-          {deck.imageUrl
-            ? <img src={deck.imageUrl} className="w-full h-full object-cover" alt="" />
-            : <span>{deck.emoji || "📚"}</span>
-          }
+      <motion.div
+        className="w-full max-w-md rounded-2xl border border-white/10 p-6 shadow-2xl" style={{ background: "rgba(13,13,22,0.97)" }}
+        initial={{ scale: 0.94, y: 16 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 16 }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-white">
+            {initial ? "Edit deck" : "New deck"}
+          </h2>
+          <button onClick={onClose} className="text-neutral-400 hover:text-white transition-colors">
+            <X size={18} />
+          </button>
         </div>
-        {/* Gradient transition */}
-        <div className="w-8 flex-shrink-0"
-          style={{ background: `linear-gradient(to right, ${color}30, transparent)` }} />
-        <div className="flex-1 bg-card/95" />
-      </div>
-      {/* Content */}
-      <div className="absolute inset-0 flex items-center gap-2 pl-20 pr-3">
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold text-xs leading-tight truncate">{deck.name}</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">{deck.cardCount || 0} карточек</div>
-          <Link href={`/study?deckId=${deck.id}`} onClick={(e) => e.stopPropagation()}>
-            <div className={cn(
-              "mt-1.5 flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-lg w-fit",
-              "bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-            )}>
-              <Play size={8} />Учить
+
+        {/* Preview */}
+        <div
+          className="flex items-center gap-3 p-4 rounded-xl mb-5"
+          style={{ background: color + "22", borderLeft: `3px solid ${color}` }}
+        >
+          <span className="text-3xl">{emoji}</span>
+          <div>
+            <div className="font-semibold text-white">{name || "Deck name"}</div>
+            {description && <div className="text-xs text-neutral-400 mt-0.5">{description}</div>}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Name</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My vocabulary deck"
+              className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Description</label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description..."
+              className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-2 block">Emoji</label>
+            <div className="flex flex-wrap gap-1.5">
+              {EMOJI_LIST.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => setEmoji(e)}
+                  className={cn(
+                    "w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all",
+                    emoji === e ? "bg-white/20 scale-110" : "bg-white/5 hover:bg-white/10"
+                  )}
+                >
+                  {e}
+                </button>
+              ))}
             </div>
-          </Link>
+          </div>
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-2 block">Color</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {COLOR_LIST.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  className={cn(
+                    "w-7 h-7 rounded-full transition-all",
+                    color === c && "ring-2 ring-white ring-offset-2 ring-offset-neutral-900 scale-110"
+                  )}
+                  style={{ background: c }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-neutral-400 hover:text-white">
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+              if (!name.trim()) { toast.error("Name is required"); return; }
+              setSaving(true);
+              try { await onSave({ name: name.trim(), emoji, color, description }); onClose(); }
+              catch { /* toast in parent */ }
+              finally { setSaving(false); }
+            }}
+            disabled={saving || !name.trim()}
+            className="flex-1"
+            style={{ background: color, color: getContrastColor(color) }}
+          >
+            {saving ? <Loader2 size={14} className="animate-spin mr-2" /> : null}
+            {initial ? "Save changes" : "Create deck"}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Card Editor Modal ────────────────────────────────────────────────────────
+
+function CardEditorModal({
+  card,
+  decks,
+  defaultDeckId,
+  onClose,
+  onSave,
+}: {
+  card?: Card;
+  decks: Deck[];
+  defaultDeckId?: string;
+  onClose: () => void;
+  onSave: (data: any) => Promise<Card | void>;
+}) {
+  const [front, setFront] = useState(card?.front ?? "");
+  const [back, setBack] = useState(card?.back ?? "");
+  const [pronunciation, setPronunciation] = useState(card?.pronunciation ?? "");
+  const [example, setExample] = useState(card?.examples?.[0] ?? "");
+  const [deckId, setDeckId] = useState(card?.deckId ?? defaultDeckId ?? "");
+  const [imageUrl, setImageUrl] = useState(card?.imageUrl ?? "");
+  const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [ttsLoading, setTtsLoading] = useState<"front" | "back" | null>(null);
+  const imgInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAiGenerate = async () => {
+    if (!front.trim()) { toast.error("Enter the front word first"); return; }
+    setAiLoading(true);
+    try {
+      const res = await aiApi.generateCard({ word: front });
+      if (res.back) setBack(res.back);
+      if (res.pronunciation) setPronunciation(res.pronunciation);
+      if (res.examples?.[0]) setExample(res.examples[0]);
+      toast.success("Card generated");
+    } catch { toast.error("AI generation failed"); }
+    finally { setAiLoading(false); }
+  };
+
+  const handleAiImage = async () => {
+    if (!front.trim()) { toast.error("Enter the front word first"); return; }
+    setImgLoading(true);
+    try {
+      const res = await aiApi.generateImage({ prompt: front, kind: "vocabulary" });
+      if (res.url) setImageUrl(res.url);
+      toast.success("Image generated");
+    } catch { toast.error("Image generation failed"); }
+    finally { setImgLoading(false); }
+  };
+
+  const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !card) return;
+    try {
+      const res = await cardsApi.uploadImage(card.id, file);
+      if (res.imageUrl) setImageUrl(res.imageUrl);
+      toast.success("Image uploaded");
+    } catch { toast.error("Upload failed"); }
+  };
+
+  const handleTts = async (text: string, side: "front" | "back") => {
+    if (!text) return;
+    setTtsLoading(side);
+    try { await speakEnglishText(text); }
+    catch { toast.error("TTS failed"); }
+    finally { setTtsLoading(null); }
+  };
+
+  const handleSave = async () => {
+    if (!front.trim()) { toast.error("Front is required"); return; }
+    setSaving(true);
+    try {
+      await onSave({
+        front: front.trim(),
+        back: back.trim(),
+        pronunciation: pronunciation.trim(),
+        examples: example.trim() ? [example.trim()] : [],
+        deckId: deckId || undefined,
+        imageUrl: imageUrl || undefined,
+      });
+      onClose();
+    } catch { /* toast in parent */ }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        className="w-full max-w-lg rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
+        style={{ background: "rgba(13,13,22,0.97)" }}
+        initial={{ scale: 0.94, y: 16 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 16 }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
+          <h2 className="text-lg font-semibold text-white">{card ? "Edit card" : "New card"}</h2>
+          <button onClick={onClose} className="text-neutral-400 hover:text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+          {/* Image */}
+          {imageUrl && (
+            <div className="relative rounded-xl overflow-hidden h-36 bg-white/5">
+              <img src={imageUrl} alt="card" className="w-full h-full object-cover" />
+              <button
+                onClick={() => setImageUrl("")}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
+          {/* Front */}
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">English (front)</label>
+            <div className="flex gap-2">
+              <Input
+                value={front}
+                onChange={(e) => setFront(e.target.value)}
+                placeholder="apple"
+                className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500 flex-1"
+                autoFocus
+              />
+              <button
+                onClick={() => handleTts(front, "front")}
+                className="px-3 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition-colors"
+              >
+                {ttsLoading === "front" ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Back */}
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Russian (back)</label>
+            <div className="flex gap-2">
+              <Input
+                value={back}
+                onChange={(e) => setBack(e.target.value)}
+                placeholder="яблоко"
+                className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500 flex-1"
+              />
+              <button
+                onClick={() => handleTts(back, "back")}
+                className="px-3 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition-colors"
+              >
+                {ttsLoading === "back" ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Pronunciation */}
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Pronunciation</label>
+            <Input
+              value={pronunciation}
+              onChange={(e) => setPronunciation(e.target.value)}
+              placeholder="/ˈæpəl/"
+              className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500"
+            />
+          </div>
+
+          {/* Example */}
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Example sentence</label>
+            <Input
+              value={example}
+              onChange={(e) => setExample(e.target.value)}
+              placeholder="I eat an apple every morning."
+              className="bg-white/5 border-white/10 text-white placeholder:text-neutral-500"
+            />
+          </div>
+
+          {/* Deck */}
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Deck</label>
+            <select
+              value={deckId}
+              onChange={(e) => setDeckId(e.target.value)}
+              className="w-full rounded-lg bg-white/5 border border-white/10 text-white text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-white/20"
+            >
+              <option value="">No deck</option>
+              {decks.map((d) => (
+                <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-2 flex-wrap pt-1">
+            <button
+              onClick={handleAiGenerate}
+              disabled={aiLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/15 border border-violet-500/20 text-violet-400 text-xs hover:bg-violet-500/25 transition-colors disabled:opacity-50"
+            >
+              {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+              AI fill card
+            </button>
+            <button
+              onClick={handleAiImage}
+              disabled={imgLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/20 text-fuchsia-400 text-xs hover:bg-fuchsia-500/25 transition-colors disabled:opacity-50"
+            >
+              {imgLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              AI image
+            </button>
+            <button
+              onClick={() => imgInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-neutral-400 text-xs hover:bg-white/10 transition-colors"
+            >
+              <Upload size={12} />
+              Upload image
+            </button>
+            <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-6 py-4 border-t border-white/8">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-neutral-400 hover:text-white">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving || !front.trim()} className="flex-1">
+            {saving ? <Loader2 size={14} className="animate-spin mr-2" /> : null}
+            {card ? "Save changes" : "Create card"}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Bulk AI Modal ────────────────────────────────────────────────────────────
+
+function BulkAIModal({
+  decks,
+  onClose,
+  onGenerated,
+}: {
+  decks: Deck[];
+  onClose: () => void;
+  onGenerated: () => void;
+}) {
+  const [topic, setTopic] = useState("");
+  const [count, setCount] = useState(10);
+  const [deckId, setDeckId] = useState(decks[0]?.id ?? "");
+  const [loading, setLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    if (!topic.trim()) { toast.error("Enter a topic"); return; }
+    setLoading(true);
+    try {
+      await aiApi.generateCardsBulk({ topic: topic.trim(), count, deckId: deckId || undefined });
+      toast.success(`Generated ${count} cards!`);
+      onGenerated();
+      onClose();
+    } catch { toast.error("Generation failed"); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-2xl border border-white/10 p-6 shadow-2xl" style={{ background: "rgba(13,13,22,0.97)" }}
+        initial={{ scale: 0.94, y: 16 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 16 }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Bulk AI generation</h2>
+            <p className="text-xs text-neutral-400 mt-0.5">Generate multiple cards from a topic or text</p>
+          </div>
+          <button onClick={onClose} className="text-neutral-400 hover:text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Topic or text</label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. kitchen vocabulary, technology words, body parts..."
+              rows={3}
+              className="w-full rounded-lg bg-white/5 border border-white/10 text-white text-sm px-3 py-2 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none"
+            />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Number of cards</label>
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={count}
+                onChange={(e) => setCount(Number(e.target.value))}
+                className="bg-white/5 border-white/10 text-white"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">Add to deck</label>
+              <select
+                value={deckId}
+                onChange={(e) => setDeckId(e.target.value)}
+                className="w-full rounded-lg bg-white/5 border border-white/10 text-white text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-white/20"
+              >
+                <option value="">No deck</option>
+                {decks.map((d) => (
+                  <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-neutral-400 hover:text-white">Cancel</Button>
+          <Button
+            onClick={handleGenerate}
+            disabled={loading || !topic.trim()}
+            className="flex-1 bg-violet-600 hover:bg-violet-500"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin mr-2" /> : <Sparkles size={14} className="mr-2" />}
+            Generate {count} cards
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Droppable Deck Item ──────────────────────────────────────────────────────
+
+function DroppableDeck({
+  deck,
+  isSelected,
+  isExpanded,
+  onSelect,
+  onToggleExpand,
+  onMenu,
+  cards,
+}: {
+  deck: Deck;
+  isSelected: boolean;
+  isExpanded: boolean;
+  onSelect: () => void;
+  onToggleExpand: () => void;
+  onMenu: (e: React.MouseEvent, el: HTMLElement) => void;
+  cards: Card[];
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `deck-${deck.id}` });
+
+  return (
+    <div ref={setNodeRef}>
+      <div
+        className={cn(
+          "group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all select-none",
+          isSelected
+            ? "bg-white/10"
+            : isOver
+            ? "bg-white/[0.07] ring-1 ring-white/20"
+            : "hover:bg-white/[0.05]"
+        )}
+        style={{ borderLeft: `3px solid ${isSelected ? deck.color : "transparent"}` }}
+        onClick={onSelect}
+      >
+        <span className="text-lg shrink-0">{deck.emoji}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-white truncate">{deck.name}</div>
+          <div className="text-[11px] text-neutral-500">{deck.cardCount} cards</div>
         </div>
         <button
-          onClick={(e) => { e.stopPropagation(); onUploadImage(deck.id); }}
-          className="w-6 h-6 rounded-lg bg-accent/80 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
-          title="Загрузить обложку"
+          onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400 hover:text-white p-0.5"
         >
-          <Upload size={10} />
+          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onMenu(e, e.currentTarget as HTMLElement); }}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400 hover:text-white p-0.5"
+        >
+          <MoreHorizontal size={13} />
+        </button>
+      </div>
+
+      {/* Inline expanded cards preview */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden ml-4 border-l border-white/8 pl-3 mt-1 mb-1"
+          >
+            {cards.slice(0, 5).map((c) => (
+              <div key={c.id} className="py-1 text-xs text-neutral-400 truncate">
+                {c.front} <span className="text-neutral-600">— {c.back}</span>
+              </div>
+            ))}
+            {cards.length === 0 && (
+              <div className="py-1 text-xs text-neutral-600 italic">No cards yet</div>
+            )}
+            {cards.length > 5 && (
+              <div className="py-1 text-xs text-neutral-600">+{cards.length - 5} more</div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Draggable Card (Grid) ────────────────────────────────────────────────────
+
+function DraggableCard({
+  card,
+  isSelected,
+  onSelect,
+  onMenu,
+  onEdit,
+}: {
+  card: Card;
+  isSelected: boolean;
+  onSelect: (e: React.MouseEvent) => void;
+  onMenu: (e: React.MouseEvent, el: HTMLElement) => void;
+  onEdit: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: card.id,
+    data: { type: "card", card },
+  });
+
+  return (
+    <motion.div
+      ref={setNodeRef}
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: isDragging ? 0.4 : 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className={cn(
+        "group relative rounded-xl border cursor-pointer select-none transition-all",
+        isSelected
+          ? "border-blue-500/40 bg-blue-500/10"
+          : "border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/15"
+      )}
+      onContextMenu={(e) => { e.preventDefault(); onMenu(e, e.currentTarget as HTMLElement); }}
+      onDoubleClick={onEdit}
+      {...attributes}
+      {...listeners}
+    >
+      {/* Checkbox */}
+      <div
+        className={cn(
+          "absolute top-2 left-2 z-10 transition-opacity",
+          isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}
+        onClick={(e) => { e.stopPropagation(); onSelect(e); }}
+      >
+        <div className={cn(
+          "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+          isSelected ? "bg-blue-500 border-blue-500" : "border-white/30 bg-black/30"
+        )}>
+          {isSelected && <Check size={11} className="text-white" />}
+        </div>
+      </div>
+
+      {/* Three-dot menu */}
+      <button
+        className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 rounded-md bg-black/40 flex items-center justify-center text-neutral-300 hover:bg-black/60"
+        onClick={(e) => { e.stopPropagation(); onMenu(e, e.currentTarget as HTMLElement); }}
+      >
+        <MoreHorizontal size={12} />
+      </button>
+
+      {/* Image */}
+      {card.imageUrl && (
+        <div className="w-full h-28 rounded-t-xl overflow-hidden">
+          <img src={card.imageUrl} alt={card.front} className="w-full h-full object-cover" />
+        </div>
+      )}
+
+      <div className={cn("p-3", card.imageUrl && "pt-2")}>
+        <div className="text-sm font-semibold text-white mb-0.5 truncate">{card.front}</div>
+        <div className="text-xs text-neutral-400 truncate mb-2">{card.back}</div>
+        {card.pronunciation && (
+          <div className="text-[11px] text-neutral-500 mb-2 font-mono">{card.pronunciation}</div>
+        )}
+        <div className="flex items-center justify-between">
+          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md font-medium", STATUS_COLORS[card.status])}>
+            {getCardStatusLabel(card.status)}
+          </span>
+          <span className="text-[10px] text-neutral-600">{getNextReviewText(card.nextReview)}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Draggable Card (List row) ────────────────────────────────────────────────
+
+function DraggableCardRow({
+  card,
+  isSelected,
+  onSelect,
+  onMenu,
+  onEdit,
+}: {
+  card: Card;
+  isSelected: boolean;
+  onSelect: (e: React.MouseEvent) => void;
+  onMenu: (e: React.MouseEvent, el: HTMLElement) => void;
+  onEdit: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: card.id,
+    data: { type: "card", card },
+  });
+
+  return (
+    <motion.div
+      ref={setNodeRef}
+      layout
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: isDragging ? 0.4 : 1, x: 0 }}
+      exit={{ opacity: 0 }}
+      className={cn(
+        "group flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer select-none transition-all",
+        isSelected
+          ? "border-blue-500/30 bg-blue-500/10"
+          : "border-transparent hover:bg-white/[0.04] hover:border-white/8"
+      )}
+      onContextMenu={(e) => { e.preventDefault(); onMenu(e, e.currentTarget as HTMLElement); }}
+      onDoubleClick={onEdit}
+      {...attributes}
+      {...listeners}
+    >
+      {/* Checkbox */}
+      <div
+        className={cn(
+          "shrink-0 transition-opacity",
+          isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}
+        onClick={(e) => { e.stopPropagation(); onSelect(e); }}
+      >
+        <div className={cn(
+          "w-4 h-4 rounded border flex items-center justify-center",
+          isSelected ? "bg-blue-500 border-blue-500" : "border-white/30"
+        )}>
+          {isSelected && <Check size={10} className="text-white" />}
+        </div>
+      </div>
+
+      {card.imageUrl && (
+        <img src={card.imageUrl} alt="" className="w-8 h-8 rounded-md object-cover shrink-0" />
+      )}
+
+      <div className="flex-1 min-w-0 flex items-center gap-4">
+        <div className="min-w-0 w-40">
+          <div className="text-sm font-medium text-white truncate">{card.front}</div>
+          {card.pronunciation && <div className="text-[11px] text-neutral-500 font-mono">{card.pronunciation}</div>}
+        </div>
+        <div className="text-sm text-neutral-400 truncate flex-1">{card.back}</div>
+        {card.examples?.[0] && (
+          <div className="text-xs text-neutral-600 truncate flex-1 hidden xl:block italic">
+            "{card.examples[0]}"
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 shrink-0">
+        <span className={cn("text-[10px] px-1.5 py-0.5 rounded-md font-medium", STATUS_COLORS[card.status])}>
+          {getCardStatusLabel(card.status)}
+        </span>
+        <span className="text-[11px] text-neutral-600 w-20 text-right">{getNextReviewText(card.nextReview)}</span>
+        <button
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400 hover:text-white"
+          onClick={(e) => { e.stopPropagation(); onMenu(e, e.currentTarget as HTMLElement); }}
+        >
+          <MoreHorizontal size={14} />
         </button>
       </div>
     </motion.div>
   );
 }
 
-// ——— Vocab Card ———
-function VocabCard({ card, onEdit, onDelete, onCopy, view }: {
-  card: Card; onEdit: (c: Card) => void; onDelete: (id: string) => void;
-  onCopy: (c: Card) => void; view: "grid" | "list";
+// ─── Study Setup Modal ────────────────────────────────────────────────────────
+
+function StudySetupModal({
+  decks,
+  allCards,
+  onStart,
+  onClose,
+}: {
+  decks: Deck[];
+  allCards: Card[];
+  onStart: (cards: Card[], deckName: string) => void;
+  onClose: () => void;
 }) {
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const [flipped, setFlipped] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
+  const [mode, setMode] = useState<"deck" | "all" | "random">("all");
+  const [deckId, setDeckId] = useState(decks[0]?.id || "");
+  const [randomCount, setRandomCount] = useState(20);
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setCtxMenu({ x: e.clientX, y: e.clientY });
+  const handleStart = () => {
+    let study: Card[] = [];
+    let name = "Все карточки";
+    if (mode === "deck") {
+      study = allCards.filter(c => c.deckId === deckId);
+      name = decks.find(d => d.id === deckId)?.name || "Колода";
+    } else if (mode === "all") {
+      study = [...allCards];
+    } else {
+      const shuffled = [...allCards].sort(() => Math.random() - 0.5);
+      study = shuffled.slice(0, Math.min(randomCount, allCards.length));
+      name = `Случайные ${study.length} карточек`;
+    }
+    if (study.length === 0) { return; }
+    onStart(study, name);
   };
 
-  const speak = async (text: string) => {
-    await speakEnglishText(text, { onStateChange: setSpeaking });
-  };
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        className="w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl"
+        style={{ background: "rgba(13,13,22,0.97)" }}
+        initial={{ scale: 0.94, y: 16 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 16 }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Brain size={18} className="text-violet-400" /> Режим изучения
+            </h2>
+            <p className="text-xs text-neutral-400 mt-0.5">Выберите, что будете учить</p>
+          </div>
+          <button onClick={onClose} className="text-neutral-400 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
 
-  const ctxItems = [
-    { label: "Редактировать", icon: Edit2, action: () => onEdit(card) },
-    { label: "Произнести", icon: Volume2, action: () => speak(card.front) },
-    { label: "Копировать", icon: Copy, action: () => onCopy(card) },
-    { label: "Удалить", icon: Trash2, action: () => onDelete(card.id), danger: true },
-  ];
+        <div className="space-y-2 mb-5">
+          {[
+            { id: "all" as const, label: "Все карточки", icon: "📚", count: allCards.length },
+            { id: "deck" as const, label: "Конкретная колода", icon: "🗂", count: null },
+            { id: "random" as const, label: "Случайные N карточек", icon: "🎲", count: null },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setMode(opt.id)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all",
+                mode === opt.id
+                  ? "bg-violet-500/15 border-violet-500/40 text-white"
+                  : "bg-white/3 border-white/8 text-white/60 hover:bg-white/6"
+              )}
+            >
+              <span className="text-lg">{opt.icon}</span>
+              <span className="flex-1 text-sm font-medium">{opt.label}</span>
+              {opt.count !== null && (
+                <span className="text-xs text-white/30">{opt.count}</span>
+              )}
+              {mode === opt.id && <Check size={14} className="text-violet-400" />}
+            </button>
+          ))}
+        </div>
 
-  const statusColors: Record<string, string> = {
-    new: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-    learning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    review: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
-    mastered: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  };
+        {mode === "deck" && decks.length > 0 && (
+          <div className="mb-4">
+            <select
+              value={deckId}
+              onChange={e => setDeckId(e.target.value)}
+              className="w-full h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none"
+            >
+              {decks.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.emoji} {d.name} ({allCards.filter(c => c.deckId === d.id).length} карт)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-  if (view === "list") {
-    return (
-      <>
-        <motion.div
-          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-          onContextMenu={handleContextMenu}
-          className="glass-card rounded-xl px-4 py-3 flex items-center gap-4 group card-hover"
-        >
-          {card.imageUrl && (
-            <img src={card.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-2">
-              <span className="font-semibold text-sm">{card.front}</span>
-              {card.subtitle && (
-                <span className="text-xs text-muted-foreground">— {card.subtitle}</span>
-              )}
-              {card.pronunciation && (
-                <span className="text-xs text-muted-foreground font-mono">{card.pronunciation}</span>
-              )}
-            </div>
-            <div className="text-sm text-muted-foreground truncate">
-              {card.back}
-              {card.footnote && (
-                <span className="text-xs ml-2 opacity-60">({card.footnote})</span>
-              )}
+        {mode === "random" && (
+          <div className="mb-4">
+            <label className="text-xs text-neutral-400 mb-1.5 block">Количество карточек: {randomCount}</label>
+            <input
+              type="range"
+              min={5}
+              max={Math.max(50, allCards.length)}
+              step={5}
+              value={randomCount}
+              onChange={e => setRandomCount(Number(e.target.value))}
+              className="w-full accent-violet-500"
+            />
+            <div className="flex justify-between text-[10px] text-neutral-500 mt-0.5">
+              <span>5</span><span>{Math.max(50, allCards.length)}</span>
             </div>
           </div>
-          <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", statusColors[card.status] || statusColors.new)}>
-            {getCardStatusLabel(card.status)}
-          </span>
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => speak(card.front)}
-              className={cn("p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-primary transition-colors", speaking && "text-primary")}>
-              <Volume2 size={13} />
+        )}
+
+        <button
+          onClick={handleStart}
+          className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+        >
+          <Play size={15} />
+          Начать изучение
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Study Session ────────────────────────────────────────────────────────────
+
+function StudySession({
+  cards,
+  deckName,
+  onClose,
+}: {
+  cards: Card[];
+  deckName: string;
+  onClose: () => void;
+}) {
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [known, setKnown] = useState<string[]>([]);
+  const [unknown, setUnknown] = useState<string[]>([]);
+  const [surpriseQ, setSurpriseQ] = useState<{ card: Card; options: string[]; answered: string | null } | null>(null);
+  const [done, setDone] = useState(false);
+
+  const shuffled = useState(() => [...cards].sort(() => Math.random() - 0.5))[0];
+  const current = shuffled[idx];
+  const progress = (idx / shuffled.length) * 100;
+
+  const SURPRISE_EVERY = 5;
+
+  const next = (wasKnown: boolean) => {
+    const newKnown = wasKnown ? [...known, current.id] : known;
+    const newUnknown = !wasKnown ? [...unknown, current.id] : unknown;
+    if (wasKnown) setKnown(newKnown); else setUnknown(newUnknown);
+
+    // Surprise test check
+    const seenCount = idx + 1;
+    if (seenCount % SURPRISE_EVERY === 0 && seenCount < shuffled.length) {
+      const seenCards = shuffled.slice(0, seenCount);
+      const q = seenCards[Math.floor(Math.random() * seenCards.length)];
+      const wrongPool = shuffled.filter(c => c.id !== q.id).map(c => c.back).filter(Boolean);
+      const wrong = wrongPool.sort(() => Math.random() - 0.5).slice(0, 3);
+      const options = [...wrong, q.back].sort(() => Math.random() - 0.5);
+      setSurpriseQ({ card: q, options, answered: null });
+      setFlipped(false);
+      return;
+    }
+
+    if (idx + 1 >= shuffled.length) {
+      setDone(true);
+    } else {
+      setIdx(i => i + 1);
+      setFlipped(false);
+    }
+  };
+
+  const dismissSurprise = () => {
+    setSurpriseQ(null);
+    if (idx + 1 >= shuffled.length) {
+      setDone(true);
+    } else {
+      setIdx(i => i + 1);
+      setFlipped(false);
+    }
+  };
+
+  if (done) {
+    const knownPct = Math.round((known.length / shuffled.length) * 100);
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center space-y-5 max-w-sm w-full"
+        >
+          <div className="w-20 h-20 rounded-3xl bg-violet-500/20 flex items-center justify-center mx-auto">
+            <Trophy size={36} className="text-violet-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-1">Сессия завершена!</h2>
+            <p className="text-neutral-400 text-sm">{deckName}</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Карточек", value: shuffled.length, color: "text-white" },
+              { label: "Знаю", value: known.length, color: "text-emerald-400" },
+              { label: "Учить", value: unknown.length, color: "text-amber-400" },
+            ].map(stat => (
+              <div key={stat.label} className="rounded-xl bg-white/5 border border-white/8 p-3">
+                <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
+                <div className="text-xs text-neutral-500">{stat.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-4xl font-black text-violet-400">{knownPct}%</div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setIdx(0); setFlipped(false); setKnown([]); setUnknown([]); setDone(false); }}
+              className="flex-1 py-3 rounded-xl bg-white/8 hover:bg-white/12 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-white/10"
+            >
+              <RotateCcw size={14} />Ещё раз
             </button>
-            <button onClick={() => onEdit(card)} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-              <Edit2 size={13} />
-            </button>
-            <button onClick={() => onDelete(card.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors">
-              <Trash2 size={13} />
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              <Check size={14} />Завершить
             </button>
           </div>
         </motion.div>
-        <AnimatePresence>
-          {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} items={ctxItems} />}
-        </AnimatePresence>
-      </>
+      </div>
+    );
+  }
+
+  if (surpriseQ) {
+    const correct = surpriseQ.card.back;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-sm space-y-4"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <div className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/25 text-amber-400 text-xs font-semibold flex items-center gap-1">
+              <Sparkles size={11} />⚡ Внезапный тест
+            </div>
+            <button onClick={dismissSurprise} className="ml-auto text-white/30 hover:text-white/60 text-xs">
+              пропустить
+            </button>
+          </div>
+          <div className="rounded-2xl border border-white/10 p-5 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+            <p className="text-xs text-white/30 mb-2 uppercase tracking-wider">Переведите слово</p>
+            <p className="text-xl font-bold text-white">{surpriseQ.card.front}</p>
+            {surpriseQ.card.pronunciation && (
+              <p className="text-xs text-white/30 mt-1 font-mono">{surpriseQ.card.pronunciation}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            {surpriseQ.options.map(opt => {
+              const isAnswered = surpriseQ.answered !== null;
+              const isCorrect = opt === correct;
+              const isSelected = opt === surpriseQ.answered;
+              return (
+                <button
+                  key={opt}
+                  onClick={() => {
+                    if (isAnswered) return;
+                    setSurpriseQ(q => q ? { ...q, answered: opt } : null);
+                  }}
+                  className={cn(
+                    "w-full text-left px-4 py-3 rounded-xl text-sm border transition-all",
+                    !isAnswered && "bg-white/5 border-white/8 hover:bg-white/10 text-white/80",
+                    isAnswered && isCorrect && "bg-emerald-500/15 border-emerald-500/30 text-emerald-300",
+                    isAnswered && isSelected && !isCorrect && "bg-red-500/15 border-red-500/30 text-red-300",
+                    isAnswered && !isSelected && !isCorrect && "border-white/5 text-white/30",
+                  )}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+          {surpriseQ.answered !== null && (
+            <button
+              onClick={dismissSurprise}
+              className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors"
+            >
+              Продолжить →
+            </button>
+          )}
+        </motion.div>
+      </div>
     );
   }
 
   return (
-    <>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-        onContextMenu={handleContextMenu}
-        className="flip-card h-40 cursor-pointer group"
-        onClick={() => setFlipped(!flipped)}
-      >
-        <div className={cn("flip-card-inner", flipped && "flipped")}>
-          {/* Front */}
-          <div className="flip-card-front glass-card rounded-2xl p-4 flex flex-col justify-between">
-            {card.imageUrl && (
-              <div className="absolute inset-0 rounded-2xl overflow-hidden opacity-15">
-                <img src={card.imageUrl} alt="" className="w-full h-full object-cover" />
-              </div>
-            )}
-            <div className="relative">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-bold text-base leading-tight">{card.front}</div>
-                  {card.subtitle && (
-                    <div className="text-[11px] text-primary/70 mt-0.5">{card.subtitle}</div>
-                  )}
-                  {card.pronunciation && (
-                    <div className="text-[11px] text-muted-foreground font-mono mt-0.5">{card.pronunciation}</div>
-                  )}
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-sm">
+      {/* Header */}
+      <div className="flex items-center gap-4 px-5 py-4 border-b border-white/8">
+        <button onClick={onClose} className="text-white/40 hover:text-white/70 transition-colors">
+          <X size={20} />
+        </button>
+        <div className="flex-1">
+          <div className="text-sm font-medium text-white">{deckName}</div>
+          <div className="text-xs text-white/30">{idx + 1} / {shuffled.length}</div>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-emerald-400">{known.length} ✓</span>
+          <span className="text-amber-400">{unknown.length} ✗</span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-0.5 bg-white/8">
+        <motion.div
+          animate={{ width: `${progress}%` }}
+          className="h-full bg-violet-500 transition-all"
+        />
+      </div>
+
+      {/* Card */}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${current.id}-${flipped ? "back" : "front"}`}
+              initial={{ opacity: 0, rotateY: flipped ? -90 : 90 }}
+              animate={{ opacity: 1, rotateY: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setFlipped(f => !f)}
+              className="cursor-pointer"
+            >
+              <div
+                className={cn(
+                  "rounded-3xl p-8 text-center min-h-[240px] flex flex-col items-center justify-center border transition-all select-none",
+                  flipped
+                    ? "bg-indigo-500/10 border-indigo-500/25"
+                    : "bg-white/4 border-white/8 hover:bg-white/6"
+                )}
+              >
+                {current.imageUrl && !flipped && (
+                  <img src={current.imageUrl} alt="" className="w-28 h-28 rounded-2xl object-cover mb-4" />
+                )}
+                <div className={cn("font-bold leading-tight mb-2", flipped ? "text-2xl text-indigo-200" : "text-3xl text-white")}>
+                  {flipped ? current.back : current.front}
                 </div>
-                {card.aiGenerated && <Sparkles size={12} className="text-violet-400 flex-shrink-0 mt-0.5" />}
+                {!flipped && current.pronunciation && (
+                  <div className="text-sm text-white/30 font-mono">{current.pronunciation}</div>
+                )}
+                {flipped && current.examples?.[0] && (
+                  <div className="text-sm text-white/40 italic mt-3 max-w-xs">"{current.examples[0]}"</div>
+                )}
+                <div className="mt-4 text-xs text-white/20">
+                  {flipped ? "нажмите чтобы скрыть" : "нажмите чтобы перевернуть"}
+                </div>
               </div>
-            </div>
-            <div className="relative flex items-center justify-between">
-              <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", statusColors[card.status] || statusColors.new)}>
-                {getCardStatusLabel(card.status)}
-              </span>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => { e.stopPropagation(); speak(card.front); }}
-                  className={cn("p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-primary transition-colors", speaking && "text-primary")}>
-                  <Volume2 size={12} />
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Action buttons */}
+          <div className="flex gap-3 mt-5">
+            {!flipped ? (
+              <button
+                onClick={() => setFlipped(true)}
+                className="flex-1 py-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Eye size={16} />Показать перевод
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => next(false)}
+                  className="flex-1 py-3 rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-semibold transition-colors"
+                >
+                  ✗ Не знаю
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); onEdit(card); }}
-                  className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                  <Edit2 size={12} />
+                <button
+                  onClick={() => next(true)}
+                  className="flex-1 py-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-sm font-semibold transition-colors"
+                >
+                  ✓ Знаю
                 </button>
-              </div>
-            </div>
-          </div>
-          {/* Back */}
-          <div className="flip-card-back glass-card rounded-2xl p-4 flex flex-col justify-between bg-primary/5">
-            <div>
-              <div className="font-semibold text-sm text-foreground leading-relaxed">{card.back}</div>
-              {card.footnote && (
-                <div className="text-[11px] text-muted-foreground mt-1 italic">{card.footnote}</div>
-              )}
-            </div>
-            {card.examples && (card.examples as string[]).length > 0 && (
-              <div className="text-[11px] text-muted-foreground italic border-l-2 border-primary/30 pl-2 line-clamp-2">
-                {(card.examples as string[])[0]}
-              </div>
+              </>
             )}
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground">{getNextReviewText(card.nextReview)}</span>
-            </div>
+          </div>
+          <div className="text-center mt-3 text-xs text-white/15">
+            Пробел — перевернуть · ← Не знаю · → Знаю
           </div>
         </div>
-      </motion.div>
-      <AnimatePresence>
-        {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} items={ctxItems} />}
-      </AnimatePresence>
-    </>
+      </div>
+    </div>
   );
 }
 
-// ——— Main Page ———
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+const CARDS_PER_PAGE = 20;
+
 export default function VocabularyPage() {
-  type CardDraft = {
-    front: string;
-    back: string;
-    subtitle: string;
-    footnote: string;
-    pronunciation: string;
-    examples: string[];
-    deckId: string;
-    imageUrl?: string;
-  };
+  const { decks, cards, isLoading, fetchDecks, fetchCards, createDeck, updateDeck, deleteDeck, createCard, updateCard, deleteCard } = useCardsStore();
 
-  const { user } = useAuthStore();
-  const { decks, publicDecks, cards, fetchDecks, fetchPublicDecks, fetchCards, createCard, updateCard, deleteCard, createDeck, adoptDeck } = useCardsStore();
-  const [selectedDeck, setSelectedDeck] = useState<string | null>(null);
+  // UI state
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [expandedDecks, setExpandedDecks] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"grid" | "list">("grid");
-  const [showAddCard, setShowAddCard] = useState(false);
-  const [showAddDeck, setShowAddDeck] = useState(false);
-  const [showAIGen, setShowAIGen] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [aiWord, setAiWord] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [imageGenerating, setImageGenerating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [page, setPage] = useState(1);
+
+  // Selection
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const lastSelectedIdx = useRef<number | null>(null);
+
+  // Modals
+  const [showNewDeck, setShowNewDeck] = useState(false);
+  const [editDeck, setEditDeck] = useState<Deck | null>(null);
+  const [showNewCard, setShowNewCard] = useState(false);
   const [editCard, setEditCard] = useState<Card | null>(null);
-  const [newCard, setNewCard] = useState<CardDraft>({
-    front: "", back: "", subtitle: "", footnote: "",
-    pronunciation: "", examples: [""], deckId: ""
-  });
-  const [newDeck, setNewDeck] = useState({ name: "", emoji: "📚", color: "#6366f1", isPublic: false });
+  const [showBulkAI, setShowBulkAI] = useState(false);
 
-  const [aiTopic, setAiTopic] = useState("");
-  const [aiCount, setAiCount] = useState(10);
-  const [aiLevel, setAiLevel] = useState("intermediate");
-  const [aiDeckId, setAiDeckId] = useState("");
-  const [bulkLoading, setBulkLoading] = useState(false);
+  // Study mode
+  const [showStudySetup, setShowStudySetup] = useState(false);
+  const [studyCards, setStudyCards] = useState<Card[] | null>(null);
+  const [studyDeckName, setStudyDeckName] = useState("");
 
-  const cardImgRef = useRef<HTMLInputElement>(null);
-  const deckImgRef = useRef<HTMLInputElement>(null);
-  const [uploadingCardId, setUploadingCardId] = useState<string | null>(null);
-  const [uploadingDeckId, setUploadingDeckId] = useState<string | null>(null);
-  const [adopting, setAdopting] = useState<string | null>(null);
+  // Context menu
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, items: [] });
 
-  useEffect(() => { fetchDecks(); }, []);
-  useEffect(() => { fetchCards(selectedDeck ? { deckId: selectedDeck } : {}); }, [selectedDeck]);
-  useEffect(() => { if (showTemplates) fetchPublicDecks(); }, [showTemplates]);
+  // DnD
+  const [activeCard, setActiveCard] = useState<Card | null>(null);
 
-  const filteredCards = cards.filter((c) =>
-    !search || c.front.toLowerCase().includes(search.toLowerCase()) || c.back.toLowerCase().includes(search.toLowerCase())
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const handleAIGenerate = async () => {
-    if (!aiWord.trim()) return;
-    setAiLoading(true);
-    try {
-      const data = await aiApi.generateCard({ word: aiWord.trim() });
-      setNewCard({
-        front: data.front, back: data.back, subtitle: data.subtitle || "", footnote: data.footnote || "",
-        pronunciation: data.pronunciation || "", examples: data.examples || [""],
-        deckId: selectedDeck || (decks[0]?.id || ""),
-      });
-      setAiWord("");
-      setShowAddCard(true);
-      toast.success("Карточка сгенерирована");
-    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка генерации"); }
-    finally { setAiLoading(false); }
-  };
+  const deckCoverInputRef = useRef<HTMLInputElement>(null);
+  const deckCoverTargetId = useRef<string | null>(null);
 
-  const handleBulkGenerate = async () => {
-    if (!aiTopic.trim()) return;
-    setBulkLoading(true);
-    try {
-      const result = await cardsApi.generateByTopic({ topic: aiTopic, count: aiCount, level: aiLevel, deckId: aiDeckId || undefined });
-      toast.success(`Создано ${result.count} карточек по теме "${aiTopic}"`);
-      setShowAIGen(false); setAiTopic("");
-      fetchDecks(); fetchCards(selectedDeck ? { deckId: selectedDeck } : {});
-    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка генерации"); }
-    finally { setBulkLoading(false); }
-  };
+  // Load data
+  useEffect(() => {
+    fetchDecks();
+    fetchCards();
+  }, []);
 
-  const handleAdoptDeck = async (id: string) => {
-    setAdopting(id);
-    try {
-      await adoptDeck(id);
-      toast.success("Набор добавлен в твою коллекцию");
-      setShowTemplates(false);
-      fetchCards(); 
-    } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка загрузки набора"); }
-    finally { setAdopting(null); }
-  };
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [selectedDeckId, search, statusFilter, sortMode]);
 
-  const handleSaveCard = async () => {
-    if (!newCard.front || !newCard.back) { toast.error("Заполни слово и перевод"); return; }
-    try {
-      const payload = { ...newCard, examples: newCard.examples.filter(Boolean) };
-      if (editCard) {
-        await updateCard(editCard.id, payload);
-        toast.success("Карточка обновлена");
-      } else {
-        await createCard({ ...payload, deckId: newCard.deckId || undefined });
-        toast.success("Карточка добавлена");
+  // ── Filtered & sorted cards ──────────────────────────────────────────────
+
+  const filteredCards = cards
+    .filter((c) => {
+      if (selectedDeckId && c.deckId !== selectedDeckId) return false;
+      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          c.front.toLowerCase().includes(q) ||
+          c.back.toLowerCase().includes(q) ||
+          c.tags?.some((t) => t.toLowerCase().includes(q))
+        );
       }
-      setShowAddCard(false); setEditCard(null);
-      setNewCard({ front: "", back: "", subtitle: "", footnote: "", pronunciation: "", examples: [""], deckId: selectedDeck || "" });
-    } catch { toast.error("Ошибка сохранения"); }
+      return true;
+    })
+    .sort((a, b) => {
+      switch (sortMode) {
+        case "newest": return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "oldest": return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "alphabetical": return a.front.localeCompare(b.front);
+        case "next-review": return new Date(a.nextReview).getTime() - new Date(b.nextReview).getTime();
+        default: return 0;
+      }
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filteredCards.length / CARDS_PER_PAGE));
+  const pagedCards = filteredCards.slice((page - 1) * CARDS_PER_PAGE, page * CARDS_PER_PAGE);
+
+  // ── Selection helpers ─────────────────────────────────────────────────────
+
+  const toggleSelect = useCallback((cardId: string, e: React.MouseEvent, idx: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (e.shiftKey && lastSelectedIdx.current !== null) {
+        const lo = Math.min(lastSelectedIdx.current, idx);
+        const hi = Math.max(lastSelectedIdx.current, idx);
+        for (let i = lo; i <= hi; i++) {
+          if (pagedCards[i]) next.add(pagedCards[i].id);
+        }
+      } else {
+        if (next.has(cardId)) next.delete(cardId);
+        else next.add(cardId);
+        lastSelectedIdx.current = idx;
+      }
+      return next;
+    });
+  }, [pagedCards]);
+
+  const selectAll = () => setSelected(new Set(pagedCards.map((c) => c.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  // ── Deck actions ──────────────────────────────────────────────────────────
+
+  const handleCreateDeck = async (data: any) => {
+    try {
+      await createDeck(data);
+      toast.success("Deck created");
+    } catch { toast.error("Failed to create deck"); throw new Error(); }
   };
 
-  const handleEditCard = (card: Card) => {
-    setEditCard(card);
-    setNewCard({
-      front: card.front, back: card.back,
-      subtitle: card.subtitle || "", footnote: card.footnote || "",
-      pronunciation: card.pronunciation || "", examples: (card.examples as string[]) || [""],
-      deckId: card.deckId || "",
-    });
-    setShowAddCard(true);
+  const handleUpdateDeck = async (id: string, data: any) => {
+    try {
+      await updateDeck(id, data);
+      toast.success("Deck updated");
+    } catch { toast.error("Failed to update deck"); throw new Error(); }
+  };
+
+  const handleDeleteDeck = async (id: string) => {
+    if (!confirm("Delete this deck? Cards will remain but become unassigned.")) return;
+    try {
+      await deleteDeck(id);
+      if (selectedDeckId === id) setSelectedDeckId(null);
+      toast.success("Deck deleted");
+    } catch { toast.error("Failed to delete deck"); }
+  };
+
+  const handleDeckCoverUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const id = deckCoverTargetId.current;
+    if (!file || !id) return;
+    try {
+      const res = await cardsApi.uploadDeckImage(id, file);
+      await updateDeck(id, { imageUrl: res.imageUrl });
+      toast.success("Cover uploaded");
+    } catch { toast.error("Upload failed"); }
+    e.target.value = "";
+  };
+
+  // ── Card actions ──────────────────────────────────────────────────────────
+
+  const handleCreateCard = async (data: any): Promise<Card | void> => {
+    try {
+      const card = await createCard({ ...data, deckId: selectedDeckId ?? data.deckId });
+      toast.success("Card created");
+      return card;
+    } catch { toast.error("Failed to create card"); throw new Error(); }
+  };
+
+  const handleUpdateCard = async (id: string, data: any) => {
+    try {
+      await updateCard(id, data);
+      toast.success("Card saved");
+    } catch { toast.error("Failed to save card"); throw new Error(); }
   };
 
   const handleDeleteCard = async (id: string) => {
-    try { await deleteCard(id); toast.success("Удалено"); } catch { toast.error("Ошибка"); }
-  };
-
-  const handleCardImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !uploadingCardId) return;
     try {
-      await cardsApi.uploadImage(uploadingCardId, file);
-      toast.success("Изображение загружено");
-      fetchCards(selectedDeck ? { deckId: selectedDeck } : {});
-    } catch { toast.error("Ошибка загрузки"); }
-    finally { setUploadingCardId(null); if (cardImgRef.current) cardImgRef.current.value = ""; }
+      await deleteCard(id);
+      setSelected((p) => { const n = new Set(p); n.delete(id); return n; });
+      toast.success("Card deleted");
+    } catch { toast.error("Failed to delete card"); }
   };
 
-  const handleDeckImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !uploadingDeckId) return;
-    try {
-      await cardsApi.uploadDeckImage(uploadingDeckId, file);
-      toast.success("Обложка набора обновлена");
-      fetchDecks();
-    } catch { toast.error("Ошибка загрузки"); }
-    finally { setUploadingDeckId(null); if (deckImgRef.current) deckImgRef.current.value = ""; }
+  const handleDeleteSelected = async () => {
+    if (!selected.size) return;
+    if (!confirm(`Delete ${selected.size} card(s)?`)) return;
+    for (const id of Array.from(selected)) await deleteCard(id).catch(() => {});
+    clearSelection();
+    toast.success("Deleted");
   };
 
-  const handleCreateDeck = async () => {
-    if (!newDeck.name) return;
-    try {
-      await createDeck(newDeck);
-      toast.success("Набор создан"); setShowAddDeck(false);
-      setNewDeck({ name: "", emoji: "📚", color: "#6366f1", isPublic: false });
-    } catch { toast.error("Ошибка"); }
+  const handleMoveSelected = async (deckId: string) => {
+    for (const id of Array.from(selected)) {
+      await cardsApi.updateCard(id, { deckId }).catch(() => {});
+    }
+    await fetchCards();
+    clearSelection();
+    toast.success("Moved");
   };
 
-  const EMOJIS = ["📚", "⭐", "🎯", "💡", "🔥", "🌍", "💼", "🏠", "🎵", "🍕", "✈️", "💪", "🧠", "🌟", "🎨"];
-  const COLORS = ["#6366f1", "#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#ef4444", "#14b8a6"];
+  const handleCopyCard = (card: Card) => {
+    navigator.clipboard.writeText(`${card.front} — ${card.back}`);
+    toast.success("Copied");
+  };
+
+  // ── Context menus ─────────────────────────────────────────────────────────
+
+  const openDeckMenu = (e: React.MouseEvent, el: HTMLElement, deck: Deck) => {
+    e.preventDefault();
+    const pos = positionNearElement(el);
+    setCtxMenu({
+      visible: true,
+      ...pos,
+      items: [
+        {
+          label: "Edit deck",
+          icon: Edit2,
+          action: () => setEditDeck(deck),
+        },
+        {
+          label: "Upload cover",
+          icon: ImageIcon,
+          action: () => {
+            deckCoverTargetId.current = deck.id;
+            deckCoverInputRef.current?.click();
+          },
+        },
+        {
+          label: "Delete deck",
+          icon: Trash2,
+          danger: true,
+          action: () => handleDeleteDeck(deck.id),
+        },
+      ],
+    });
+  };
+
+  const openCardMenu = (e: React.MouseEvent, el: HTMLElement, card: Card) => {
+    e.preventDefault();
+    const pos = positionNearElement(el);
+    const moveSubmenu: ContextMenuItem[] = decks.map((d) => ({
+      label: `${d.emoji} ${d.name}`,
+      icon: ArrowRight,
+      action: async () => {
+        await cardsApi.updateCard(card.id, { deckId: d.id });
+        await fetchCards();
+        toast.success(`Moved to ${d.name}`);
+      },
+    }));
+
+    setCtxMenu({
+      visible: true,
+      ...pos,
+      items: [
+        { label: "Edit", icon: Edit2, action: () => setEditCard(card) },
+        { label: "Copy", icon: Copy, action: () => handleCopyCard(card) },
+        {
+          label: "Move to deck",
+          icon: Layers,
+          action: () => {},
+          submenu: moveSubmenu,
+        },
+        { label: "Delete", icon: Trash2, danger: true, action: () => handleDeleteCard(card.id) },
+      ],
+    });
+  };
+
+  // ── DnD handlers ──────────────────────────────────────────────────────────
+
+  const handleDragStart = (e: DragStartEvent) => {
+    const c = cards.find((c) => c.id === e.active.id);
+    if (c) setActiveCard(c);
+  };
+
+  const handleDragEnd = async (e: DragEndEvent) => {
+    setActiveCard(null);
+    const { over, active } = e;
+    if (!over) return;
+    const overId = String(over.id);
+    if (!overId.startsWith("deck-")) return;
+    const deckId = overId.replace("deck-", "");
+    const cardIds = selected.size > 0 && selected.has(String(active.id))
+      ? Array.from(selected)
+      : [String(active.id)];
+    for (const cid of cardIds) {
+      await cardsApi.updateCard(cid, { deckId }).catch(() => {});
+    }
+    await fetchCards();
+    clearSelection();
+    toast.success("Moved to deck");
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+
+  const selectedDeck = decks.find((d) => d.id === selectedDeckId);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5 page-enter">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Карточки</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{cards.length} слов</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowTemplates(true)}>
-            <Library size={13} /> Шаблоны
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowAddDeck(true)}>
-            <FolderPlus size={13} /> Набор
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowAIGen(true)}>
-            <Sparkles size={13} className="text-violet-500" /> AI по теме
-          </Button>
-          <Button size="sm" className="btn-gradient gap-1.5" onClick={() => { setEditCard(null); setShowAddCard(true); }}>
-            <Plus size={13} /> Карточка
-          </Button>
-        </div>
-      </div>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="flex h-full min-h-screen text-white" style={{ background: "transparent" }}>
 
-      {/* AI Quick Add */}
-      <div className="glass-card rounded-2xl p-3 flex gap-2 items-center">
-        <div className="w-7 h-7 rounded-xl bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-          <Wand2 size={14} className="text-violet-500" />
-        </div>
-        <Input
-          placeholder="Введи слово — AI создаст карточку..."
-          value={aiWord} onChange={(e) => setAiWord(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAIGenerate()}
-          className="flex-1 bg-transparent border-0 focus-visible:ring-0 px-1 h-8"
-        />
-        <Button size="sm" className="btn-gradient h-8 px-3 gap-1.5 flex-shrink-0"
-          onClick={handleAIGenerate} disabled={aiLoading || !aiWord.trim()}>
-          {aiLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-          Создать
-        </Button>
-      </div>
+        {/* Hidden inputs */}
+        <input ref={deckCoverInputRef} type="file" accept="image/*" className="hidden" onChange={handleDeckCoverUpload} />
 
-      {/* Deck cards row */}
-      <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
-        {/* All decks card */}
-        <motion.div
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setSelectedDeck(null)}
-          className={cn(
-            "relative flex-shrink-0 w-40 h-20 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200",
-            !selectedDeck ? "ring-2 ring-primary shadow-lg shadow-primary/15" : "hover:shadow-md"
+        {/* Study overlays */}
+        <AnimatePresence>
+          {showStudySetup && (
+            <StudySetupModal
+              decks={decks}
+              allCards={cards}
+              onStart={(studyCardList, name) => {
+                setStudyCards(studyCardList);
+                setStudyDeckName(name);
+                setShowStudySetup(false);
+              }}
+              onClose={() => setShowStudySetup(false)}
+            />
           )}
-        >
-          <div className="absolute inset-0 flex">
-            <div className="w-14 flex-shrink-0 flex items-center justify-center text-2xl bg-primary/15">
-              <BookOpen size={22} className="text-primary" />
+        </AnimatePresence>
+        <AnimatePresence>
+          {studyCards && (
+            <StudySession
+              cards={studyCards}
+              deckName={studyDeckName}
+              onClose={() => setStudyCards(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* ── Left sidebar: deck list ────────────────────────────────────── */}
+        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-white/8 pt-6 pb-4">
+          <div className="px-4 mb-4">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Колоды</span>
+              <button
+                onClick={() => setShowNewDeck(true)}
+                className="w-6 h-6 rounded-md bg-white/5 hover:bg-white/10 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+              >
+                <Plus size={13} />
+              </button>
             </div>
-            <div className="w-6 flex-shrink-0" style={{ background: "linear-gradient(to right, hsl(var(--primary)/0.15), transparent)" }} />
-            <div className="flex-1 bg-card/95" />
           </div>
-          <div className="absolute inset-0 flex items-center pl-[76px] pr-3">
-            <div>
-              <div className="font-semibold text-xs leading-tight">Все карточки</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">{cards.length} слов</div>
-              <Link href="/study" onClick={(e) => e.stopPropagation()}>
-                <div className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-lg w-fit bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                  <Play size={8} />Учить
+
+          {/* All cards */}
+          <div
+            className={cn(
+              "mx-2 flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-colors mb-1",
+              selectedDeckId === null ? "bg-white/10" : "hover:bg-white/[0.05]"
+            )}
+            style={{ borderLeft: selectedDeckId === null ? "3px solid #6366f1" : "3px solid transparent" }}
+            onClick={() => setSelectedDeckId(null)}
+          >
+            <BookOpen size={16} className="text-indigo-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-white">Все карточки</div>
+              <div className="text-[11px] text-neutral-500">{cards.length} всего</div>
+            </div>
+          </div>
+
+          {/* Deck list */}
+          <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+            {decks.map((deck) => {
+              const deckCards = cards.filter((c) => c.deckId === deck.id);
+              return (
+                <DroppableDeck
+                  key={deck.id}
+                  deck={deck}
+                  isSelected={selectedDeckId === deck.id}
+                  isExpanded={expandedDecks.has(deck.id)}
+                  onSelect={() => setSelectedDeckId(deck.id)}
+                  onToggleExpand={() => {
+                    setExpandedDecks((p) => {
+                      const n = new Set(p);
+                      if (n.has(deck.id)) n.delete(deck.id);
+                      else n.add(deck.id);
+                      return n;
+                    });
+                  }}
+                  onMenu={(e, el) => openDeckMenu(e, el, deck)}
+                  cards={deckCards}
+                />
+              );
+            })}
+            {decks.length === 0 && (
+              <div className="px-3 py-4 text-xs text-neutral-600 italic">Колод пока нет</div>
+            )}
+          </div>
+
+          {/* Bulk AI button */}
+          <div className="px-4 pt-3 border-t border-white/8 mt-2">
+            <button
+              onClick={() => setShowBulkAI(true)}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-600/10 border border-violet-500/20 text-violet-400 text-xs hover:bg-violet-600/20 transition-colors"
+            >
+              <Zap size={12} />
+              <span>AI генерация</span>
+            </button>
+          </div>
+        </aside>
+
+        {/* ── Main area ─────────────────────────────────────────────────── */}
+        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* Toolbar */}
+          <div className="flex items-center gap-3 px-5 py-4 border-b border-white/8 flex-wrap">
+            {/* Deck title */}
+            <div className="flex items-center gap-2 mr-2">
+              {selectedDeck ? (
+                <>
+                  <span className="text-xl">{selectedDeck.emoji}</span>
+                  <div>
+                    <div className="text-base font-semibold text-white leading-tight">{selectedDeck.name}</div>
+                    <div className="text-xs text-neutral-500">{filteredCards.length} карточек</div>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <div className="text-base font-semibold text-white leading-tight">Все карточки</div>
+                  <div className="text-xs text-neutral-500">{filteredCards.length} карточек</div>
                 </div>
-              </Link>
+              )}
             </div>
-          </div>
-        </motion.div>
 
-        {decks.map((deck) => (
-          <DeckCard
-            key={deck.id} deck={deck}
-            isSelected={selectedDeck === deck.id}
-            onSelect={() => setSelectedDeck(selectedDeck === deck.id ? null : deck.id)}
-            onUploadImage={(id) => { setUploadingDeckId(id); deckImgRef.current?.click(); }}
-          />
-        ))}
-
-        {/* Add deck shortcut */}
-        <motion.div
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setShowAddDeck(true)}
-          className="flex-shrink-0 w-20 h-20 rounded-2xl border-2 border-dashed border-border/50 hover:border-primary/30 flex flex-col items-center justify-center gap-1.5 cursor-pointer text-muted-foreground hover:text-primary transition-colors"
-        >
-          <Plus size={16} />
-          <span className="text-[10px] font-medium">Набор</span>
-        </motion.div>
-      </div>
-
-      {/* Search + view toggle */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Поиск по карточкам..." value={search}
-            onChange={(e) => setSearch(e.target.value)} className="pl-7 h-9 text-sm" />
-        </div>
-        {search && (
-          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSearch("")}>
-            <X size={13} />
-          </Button>
-        )}
-        <div className="ml-auto flex gap-1">
-          <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon" className="h-9 w-9" onClick={() => setView("grid")}>
-            <Grid size={14} />
-          </Button>
-          <Button variant={view === "list" ? "secondary" : "ghost"} size="icon" className="h-9 w-9" onClick={() => setView("list")}>
-            <List size={14} />
-          </Button>
-        </div>
-      </div>
-
-      {/* Hidden file inputs */}
-      <input ref={cardImgRef} type="file" accept="image/*" className="hidden" onChange={handleCardImageUpload} />
-      <input ref={deckImgRef} type="file" accept="image/*" className="hidden" onChange={handleDeckImageUpload} />
-
-      {/* Cards grid/list */}
-      <AnimatePresence mode="popLayout">
-        {filteredCards.length > 0 ? (
-          <div className={cn(
-            "grid gap-2.5",
-            view === "grid" ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-4" : "grid-cols-1"
-          )}>
-            {filteredCards.map((card) => (
-              <VocabCard key={card.id} card={card} view={view}
-                onEdit={handleEditCard}
-                onDelete={handleDeleteCard}
-                onCopy={(c) => { navigator.clipboard.writeText(`${c.front} — ${c.back}`); toast.success("Скопировано"); }}
+            {/* Search */}
+            <div className="relative flex-1 max-w-72">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Поиск карточек..."
+                className="pl-8 bg-white/5 border-white/10 text-white placeholder:text-neutral-500 text-sm h-9"
               />
-            ))}
-          </div>
-        ) : (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20 text-muted-foreground">
-            <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mx-auto mb-4">
-              <BookOpen size={24} className="text-muted-foreground/50" />
+              {search && (
+                <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white">
+                  <X size={13} />
+                </button>
+              )}
             </div>
-            <p className="font-medium">{search ? "Ничего не найдено" : "Карточек пока нет"}</p>
-            <p className="text-sm mt-1 text-muted-foreground/70">
-              {search ? "Попробуй другой запрос" : "Добавь первую карточку или создай набор с AI"}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* === Add/Edit Card Modal === */}
-      <AnimatePresence>
-        {showAddCard && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowAddCard(false)}>
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-card-strong bg-card border rounded-2xl p-6 w-full max-w-md shadow-2xl">
-              <div className="flex justify-between items-center mb-5">
-                <h3 className="font-semibold text-lg">{editCard ? "Редактировать" : "Новая карточка"}</h3>
-                <button onClick={() => { setShowAddCard(false); setEditCard(null); }}
-                  className="w-8 h-8 rounded-xl hover:bg-accent flex items-center justify-center text-muted-foreground transition-colors">
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="space-y-3">
-                {/* Front + back main */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Слово (EN)</label>
-                    <Input value={newCard.front} onChange={(e) => setNewCard({ ...newCard, front: e.target.value })} placeholder="apple" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Перевод (RU)</label>
-                    <Input value={newCard.back} onChange={(e) => setNewCard({ ...newCard, back: e.target.value })} placeholder="яблоко" />
-                  </div>
-                </div>
-                {/* Subtitles */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Подпись к слову</label>
-                    <Input value={newCard.subtitle} onChange={(e) => setNewCard({ ...newCard, subtitle: e.target.value })} placeholder="существительное" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Подпись к переводу</label>
-                    <Input value={newCard.footnote} onChange={(e) => setNewCard({ ...newCard, footnote: e.target.value })} placeholder="фрукт" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block font-medium">Произношение (IPA)</label>
-                  <Input value={newCard.pronunciation} onChange={(e) => setNewCard({ ...newCard, pronunciation: e.target.value })} placeholder="/ˈæpl/" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block font-medium">Пример</label>
-                  <Input value={newCard.examples[0]} onChange={(e) => setNewCard({ ...newCard, examples: [e.target.value] })} placeholder="I ate an apple." />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 flex items-center justify-between font-medium">
-                    <span>Картинка (URL)</span>
-                    <button 
-                      className={cn(
-                        "text-violet-500 font-semibold flex items-center gap-1 bg-violet-500/10 px-2 py-0.5 rounded-md transition-colors",
-                        imageGenerating ? "opacity-70 cursor-not-allowed" : "hover:text-violet-400"
-                      )}
-                      disabled={imageGenerating}
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        if (!newCard.front) { toast.error("Сначала введи английское слово"); return; }
-                        setImageGenerating(true);
-                        try {
-                          const prompt = `${newCard.front}. Beautiful simple minimalistic flat vector illustration, colorful, solid pastel background, no text, clean design`;
-                          const data = await aiApi.generateImage({ prompt, kind: "card" });
-                          setNewCard((current) => ({ ...current, imageUrl: data.imageUrl }));
-                        } catch (error: any) {
-                          toast.error(error?.response?.data?.error || "Ошибка генерации картинки");
-                        } finally {
-                          setImageGenerating(false);
-                        }
-                      }}
-                    >
-                      {imageGenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />} AI сгенерировать
-                    </button>
-                  </label>
-                  <Input value={newCard.imageUrl || ""} onChange={(e) => setNewCard({ ...newCard, imageUrl: e.target.value })} placeholder="https://image.pollinations.ai/..." />
-                  {newCard.imageUrl && (
-                    <div className="mt-2 w-full h-24 rounded-xl overflow-hidden border border-border/50 relative bg-black/5 group flex items-center justify-center">
-                      <img src={newCard.imageUrl} alt="preview" className="max-w-full max-h-full object-contain" loading="lazy" />
-                      <button 
-                        onClick={() => setNewCard({ ...newCard, imageUrl: "" })}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-md bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
+            {/* Status filter */}
+            <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5 border border-white/8">
+              {([
+                { id: "all", label: "Все" },
+                { id: "new", label: "Новые" },
+                { id: "learning", label: "Учу" },
+                { id: "review", label: "Повтор" },
+                { id: "mastered", label: "Знаю" },
+              ] as {id: StatusFilter; label: string}[]).map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setStatusFilter(s.id)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                    statusFilter === s.id
+                      ? "bg-white/10 text-white"
+                      : "text-neutral-500 hover:text-neutral-300"
                   )}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sort */}
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="h-9 rounded-lg bg-white/[0.04] border border-white/8 text-neutral-300 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-white/20"
+            >
+              <option value="newest">Новые</option>
+              <option value="oldest">Старые</option>
+              <option value="alphabetical">А–Я</option>
+              <option value="next-review">Повторить</option>
+            </select>
+
+            {/* View toggle */}
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/8">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={cn("w-7 h-7 rounded-md flex items-center justify-center transition-colors",
+                  viewMode === "grid" ? "bg-white/10 text-white" : "text-neutral-500 hover:text-neutral-300")}
+              >
+                <Grid size={13} />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={cn("w-7 h-7 rounded-md flex items-center justify-center transition-colors",
+                  viewMode === "list" ? "bg-white/10 text-white" : "text-neutral-500 hover:text-neutral-300")}
+              >
+                <List size={13} />
+              </button>
+            </div>
+
+            {/* Study + Add card */}
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                onClick={() => setShowStudySetup(true)}
+                size="sm"
+                disabled={cards.length === 0}
+                className="h-9 gap-1.5 bg-violet-600 hover:bg-violet-500 text-white border-0"
+              >
+                <Brain size={14} />
+                Учить
+              </Button>
+              <Button
+                onClick={() => setShowNewCard(true)}
+                size="sm"
+                className="h-9 gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white border-0"
+              >
+                <Plus size={14} />
+                Добавить
+              </Button>
+            </div>
+          </div>
+
+          {/* Selection bar */}
+          <AnimatePresence>
+            {selected.size > 0 && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 py-2 bg-blue-500/10 border-b border-blue-500/20">
+                  <span className="text-sm text-blue-300 font-medium">{selected.size} выбрано</span>
+                  <button onClick={selectAll} className="text-xs text-blue-400 hover:text-blue-300 underline">Выбрать все</button>
+                  <button onClick={clearSelection} className="text-xs text-neutral-400 hover:text-white underline">Снять</button>
+                  <div className="flex items-center gap-2 ml-auto">
+                    {decks.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={(e) => { if (e.target.value) handleMoveSelected(e.target.value); e.target.value = ""; }}
+                        className="h-7 rounded-lg bg-white/5 border border-white/10 text-white text-xs px-2 focus:outline-none"
+                      >
+                        <option value="" disabled>Переместить в колоду…</option>
+                        {decks.map((d) => <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>)}
+                      </select>
+                    )}
+                    <button
+                      onClick={handleDeleteSelected}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-500/15 border border-red-500/20 text-red-400 text-xs hover:bg-red-500/25 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block font-medium">Набор</label>
-                  <select value={newCard.deckId} onChange={(e) => setNewCard({ ...newCard, deckId: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
-                    <option value="">Без набора</option>
-                    {decks.map((d) => <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>)}
-                  </select>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Cards area */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-24">
+                <Loader2 size={24} className="animate-spin text-neutral-500" />
+              </div>
+            ) : filteredCards.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <div className="text-5xl mb-4">📭</div>
+                <div className="text-neutral-400 font-medium mb-1">Карточки не найдены</div>
+                <div className="text-sm text-neutral-600 mb-6">
+                  {search ? "Попробуйте другой запрос" : "Добавьте первую карточку для начала"}
                 </div>
-                <Button className="w-full btn-gradient" onClick={handleSaveCard}>
-                  <Check size={15} className="mr-2" />
-                  {editCard ? "Сохранить" : "Создать карточку"}
+                <Button onClick={() => setShowNewCard(true)} size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-500">
+                  <Plus size={14} />
+                  Добавить карточку
                 </Button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* === AI Bulk Gen Modal === */}
-      <AnimatePresence>
-        {showAIGen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowAIGen(false)}>
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-card-strong bg-card border rounded-2xl p-6 w-full max-w-md shadow-2xl">
-              <div className="flex justify-between items-center mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-violet-500/10 flex items-center justify-center">
-                    <Sparkles size={17} className="text-violet-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">AI по теме</h3>
-                    <p className="text-xs text-muted-foreground">Сгенерирует набор карточек</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowAIGen(false)}
-                  className="w-8 h-8 rounded-xl hover:bg-accent flex items-center justify-center text-muted-foreground">
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block font-medium">Тема</label>
-                  <Input value={aiTopic} onChange={(e) => setAiTopic(e.target.value)} placeholder="Путешествия, технологии, еда..." />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Количество</label>
-                    <select value={aiCount} onChange={(e) => setAiCount(parseInt(e.target.value))}
-                      className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
-                      {[5, 10, 15, 20, 30].map(n => <option key={n} value={n}>{n} карточек</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block font-medium">Уровень</label>
-                    <select value={aiLevel} onChange={(e) => setAiLevel(e.target.value)}
-                      className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
-                      <option value="beginner">Начинающий</option>
-                      <option value="intermediate">Средний</option>
-                      <option value="advanced">Продвинутый</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block font-medium">Добавить в набор</label>
-                  <select value={aiDeckId} onChange={(e) => setAiDeckId(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
-                    <option value="">Без набора</option>
-                    {decks.map((d) => <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>)}
-                  </select>
-                </div>
-                <Button className="w-full btn-gradient" onClick={handleBulkGenerate} disabled={bulkLoading || !aiTopic.trim()}>
-                  {bulkLoading ? <><Loader2 size={14} className="animate-spin mr-2" />Генерирую...</>
-                    : <><Sparkles size={14} className="mr-2" />Сгенерировать {aiCount} карточек</>}
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* === Add Deck Modal === */}
-      <AnimatePresence>
-        {showAddDeck && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowAddDeck(false)}>
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-card-strong bg-card border rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-              <div className="flex justify-between items-center mb-5">
-                <h3 className="font-semibold">Новый набор</h3>
-                <button onClick={() => setShowAddDeck(false)}
-                  className="w-8 h-8 rounded-xl hover:bg-accent flex items-center justify-center text-muted-foreground">
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <Input placeholder="Название набора" value={newDeck.name} onChange={(e) => setNewDeck({ ...newDeck, name: e.target.value })} />
-                <div>
-                  <label className="text-xs text-muted-foreground mb-2 block font-medium">Иконка</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {EMOJIS.map((e) => (
-                      <button key={e} onClick={() => setNewDeck({ ...newDeck, emoji: e })}
-                        className={cn("text-xl p-1.5 rounded-xl transition-all", newDeck.emoji === e ? "bg-primary/15 ring-2 ring-primary/30" : "hover:bg-accent")}>
-                        {e}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-2 block font-medium">Цвет</label>
-                  <div className="flex gap-2 flex-wrap">
-                    {COLORS.map((c) => (
-                      <button key={c} onClick={() => setNewDeck({ ...newDeck, color: c })}
-                        className={cn("w-7 h-7 rounded-lg transition-all", newDeck.color === c ? "ring-2 ring-offset-2 ring-foreground/30 scale-110" : "hover:scale-105")}
-                        style={{ background: c }} />
-                    ))}
-                  </div>
-                </div>
-                {user?.role === "admin" && (
-                  <div className="flex items-center gap-2 mt-4 bg-accent/30 p-3 rounded-xl border border-primary/20">
-                    <input 
-                      type="checkbox" 
-                      id="isPublic"
-                      className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 cursor-pointer"
-                      checked={newDeck.isPublic} 
-                      onChange={(e) => setNewDeck({ ...newDeck, isPublic: e.target.checked })} 
+            ) : viewMode === "grid" ? (
+              <motion.div
+                className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+                layout
+              >
+                <AnimatePresence mode="popLayout">
+                  {pagedCards.map((card, idx) => (
+                    <DraggableCard
+                      key={card.id}
+                      card={card}
+                      isSelected={selected.has(card.id)}
+                      onSelect={(e) => toggleSelect(card.id, e, idx)}
+                      onMenu={(e, el) => openCardMenu(e, el, card)}
+                      onEdit={() => setEditCard(card)}
                     />
-                    <label htmlFor="isPublic" className="text-sm font-medium cursor-pointer flex-1">
-                      Сделать публичным шаблоном 👑 <span className="text-muted-foreground text-xs block font-normal mt-0.5">Все пользователи смогут скопировать этот набор</span>
-                    </label>
-                  </div>
-                )}
-                {/* Preview */}
-                <div className="rounded-xl overflow-hidden h-14 relative border border-border/40">
-                  <div className="absolute inset-0 flex">
-                    <div className="w-12 flex items-center justify-center text-xl" style={{ background: `${newDeck.color}30` }}>
-                      {newDeck.emoji}
-                    </div>
-                    <div className="w-6" style={{ background: `linear-gradient(to right, ${newDeck.color}30, transparent)` }} />
-                    <div className="flex-1 bg-card flex items-center px-3">
-                      <div>
-                        <div className="font-semibold text-xs">{newDeck.name || "Название набора"}</div>
-                        <div className="text-[10px] text-muted-foreground">0 карточек</div>
-                      </div>
-                    </div>
-                  </div>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            ) : (
+              <div className="space-y-0.5">
+                {/* List header */}
+                <div className="flex items-center gap-3 px-3 py-2 text-[11px] text-neutral-500 uppercase tracking-wider border-b border-white/8 mb-1">
+                  <div className="w-4 shrink-0" />
+                  <div className="w-40">Word</div>
+                  <div className="flex-1">Translation</div>
+                  <div className="flex-1 hidden xl:block">Example</div>
+                  <div className="w-20 shrink-0">Status</div>
+                  <div className="w-20 shrink-0 text-right">Next review</div>
+                  <div className="w-5 shrink-0" />
                 </div>
-                <Button className="w-full btn-gradient" onClick={handleCreateDeck} disabled={!newDeck.name}>
-                  Создать набор
-                </Button>
+                <AnimatePresence mode="popLayout">
+                  {pagedCards.map((card, idx) => (
+                    <DraggableCardRow
+                      key={card.id}
+                      card={card}
+                      isSelected={selected.has(card.id)}
+                      onSelect={(e) => toggleSelect(card.id, e, idx)}
+                      onMenu={(e, el) => openCardMenu(e, el, card)}
+                      onEdit={() => setEditCard(card)}
+                    />
+                  ))}
+                </AnimatePresence>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            )}
+          </div>
 
-      {/* === Templates Browser Modal === */}
-      <AnimatePresence>
-        {showTemplates && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowTemplates(false)}>
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-card-strong bg-card border rounded-2xl p-6 w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
-              <div className="flex justify-between items-center mb-5 flex-shrink-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Library size={17} className="text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Библиотека наборов</h3>
-                    <p className="text-xs text-muted-foreground">Готовые наборы для изучения</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowTemplates(false)}
-                  className="w-8 h-8 rounded-xl hover:bg-accent flex items-center justify-center text-muted-foreground">
-                  <X size={16} />
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-white/8">
+              <span className="text-xs text-neutral-500">
+                {(page - 1) * CARDS_PER_PAGE + 1}–{Math.min(page * CARDS_PER_PAGE, filteredCards.length)} of {filteredCards.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center text-neutral-300 transition-colors"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+                  let p: number;
+                  if (totalPages <= 7) p = i + 1;
+                  else if (page <= 4) p = i + 1;
+                  else if (page >= totalPages - 3) p = totalPages - 6 + i;
+                  else p = page - 3 + i;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      className={cn(
+                        "w-8 h-8 rounded-lg text-xs font-medium transition-colors",
+                        p === page ? "bg-white/15 text-white" : "bg-white/[0.03] hover:bg-white/10 text-neutral-400"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 flex items-center justify-center text-neutral-300 transition-colors"
+                >
+                  <ChevronRight size={14} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-hide pb-2">
-                {publicDecks.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">
-                    <Library className="mx-auto mb-3 opacity-30" size={32} />
-                    <p>Нет доступных шаблонов</p>
-                  </div>
-                ) : (
-                  publicDecks.map((deck) => (
-                    <div key={deck.id} className="relative flex items-center p-3 rounded-2xl border bg-card/50 hover:bg-accent/30 transition-colors">
-                      <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl flex-shrink-0" style={{ background: `${deck.color}30` }}>
-                        {deck.imageUrl ? <img src={deck.imageUrl} className="w-full h-full object-cover rounded-xl" alt="" /> : !!deck.emoji ? deck.emoji : "📚"}
-                      </div>
-                      <div className="ml-4 flex-1">
-                        <h4 className="font-semibold text-sm">{deck.name}</h4>
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{deck.description || "Нет описания"}</p>
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-accent text-accent-foreground">{deck.category}</span>
-                          <span className="text-[10px] text-muted-foreground">{deck.cardCount} карточек</span>
-                        </div>
-                      </div>
-                      <Button size="sm" variant="gradient" className="ml-3 gap-1.5" 
-                        onClick={() => handleAdoptDeck(deck.id)} 
-                        disabled={adopting === deck.id}>
-                        {adopting === deck.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                        Добавить
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            </div>
+          )}
+        </main>
+
+        {/* ── DragOverlay ────────────────────────────────────────────────── */}
+        <DragOverlay>
+          {activeCard && (
+            <div className="rounded-xl border border-white/20 bg-background shadow-2xl p-3 w-44 rotate-3 opacity-90 pointer-events-none">
+              <div className="text-sm font-semibold text-white truncate">{activeCard.front}</div>
+              <div className="text-xs text-neutral-400 truncate">{activeCard.back}</div>
+            </div>
+          )}
+        </DragOverlay>
+
+        {/* ── Context menu ───────────────────────────────────────────────── */}
+        <AnimatePresence>
+          {ctxMenu.visible && (
+            <ContextMenu state={ctxMenu} onClose={() => setCtxMenu((p) => ({ ...p, visible: false }))} />
+          )}
+        </AnimatePresence>
+
+        {/* ── Modals ─────────────────────────────────────────────────────── */}
+        <AnimatePresence>
+          {showNewDeck && (
+            <NewDeckModal
+              onClose={() => setShowNewDeck(false)}
+              onSave={handleCreateDeck}
+            />
+          )}
+          {editDeck && (
+            <NewDeckModal
+              initial={{ name: editDeck.name, emoji: editDeck.emoji, color: editDeck.color, description: editDeck.description ?? "" }}
+              onClose={() => setEditDeck(null)}
+              onSave={(data) => handleUpdateDeck(editDeck.id, data)}
+            />
+          )}
+          {showNewCard && (
+            <CardEditorModal
+              decks={decks}
+              defaultDeckId={selectedDeckId ?? undefined}
+              onClose={() => setShowNewCard(false)}
+              onSave={handleCreateCard}
+            />
+          )}
+          {editCard && (
+            <CardEditorModal
+              card={editCard}
+              decks={decks}
+              onClose={() => setEditCard(null)}
+              onSave={(data) => handleUpdateCard(editCard.id, data)}
+            />
+          )}
+          {showBulkAI && (
+            <BulkAIModal
+              decks={decks}
+              onClose={() => setShowBulkAI(false)}
+              onGenerated={() => { fetchCards(); fetchDecks(); }}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+    </DndContext>
   );
 }

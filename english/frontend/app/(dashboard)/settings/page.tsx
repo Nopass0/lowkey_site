@@ -48,8 +48,15 @@ export default function SettingsPage() {
     if (!file) return;
     setAvatarUploading(true);
     try {
-      const updated = await authApi.uploadAvatar(file);
-      setUser(updated);
+      const res = await authApi.uploadAvatar(file);
+      // Backend may return { user: {...} } or the user directly
+      const updatedUser = res?.user || res;
+      if (updatedUser?.id || updatedUser?.avatarUrl) {
+        setUser(updatedUser);
+      } else {
+        // Fallback: re-fetch user to get updated avatar
+        await useAuthStore.getState().fetchMe();
+      }
       toast.success("Фото обновлено");
     } catch (e: any) { toast.error(e?.response?.data?.error || "Ошибка загрузки фото"); }
     finally { setAvatarUploading(false); if (avatarInputRef.current) avatarInputRef.current.value = ""; }

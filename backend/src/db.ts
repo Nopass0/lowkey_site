@@ -69,6 +69,7 @@ export interface PrismaLikeClient {
   aiFile: PrismaDelegate;
   vpnDomainStats: PrismaDelegate;
   mtprotoSettings: PrismaDelegate;
+  pushNotification: PrismaDelegate;
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: PrismaLikeClient) => Promise<T>): Promise<T>;
   $transaction<T>(operations: Promise<T>[]): Promise<T[]>;
@@ -107,7 +108,8 @@ type ModelName =
   | "aiUsageEntry"
   | "aiFile"
   | "vpnDomainStats"
-  | "mtprotoSettings";
+  | "mtprotoSettings"
+  | "pushNotification";
 
 type RelationConfig = {
   model: ModelName;
@@ -173,8 +175,15 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "vpnMaxConcurrentConnections",
       "vpnSpeedLimitUpMbps",
       "vpnSpeedLimitDownMbps",
+      "lastAndroidVersion",
+      "lastAndroidSeenAt",
+      "lastAndroidDevice",
+      "lastAndroidLocale",
+      "lastAndroidTimezone",
+      "lastAndroidLat",
+      "lastAndroidLng",
     ],
-    dateFields: ["joinedAt", "botLoginCodeExpiresAt", "telegramLinkCodeExpiresAt"],
+    dateFields: ["joinedAt", "botLoginCodeExpiresAt", "telegramLinkCodeExpiresAt", "lastAndroidSeenAt"],
     bigintFields: ["telegramId"],
     relations: {
       subscription: { model: "subscription", type: "one", localField: "id", foreignField: "userId" },
@@ -632,6 +641,11 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
     relations: {
       createdBy: { model: "user", type: "one", localField: "createdById", foreignField: "id" },
     },
+  },
+  pushNotification: {
+    collection: "push_notifications",
+    fields: ["id", "userId", "title", "body", "isRead", "createdAt"],
+    dateFields: ["createdAt"],
   },
 };
 
@@ -1912,6 +1926,7 @@ class VoidPrismaClient implements PrismaLikeClient {
   aiFile = new VoidPrismaDelegate("aiFile");
   vpnDomainStats = new VoidPrismaDelegate("vpnDomainStats");
   mtprotoSettings = new VoidPrismaDelegate("mtprotoSettings");
+  pushNotification = new VoidPrismaDelegate("pushNotification");
 
   async $disconnect() {
     return;

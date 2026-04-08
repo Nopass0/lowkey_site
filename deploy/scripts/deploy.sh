@@ -9,9 +9,18 @@ N8N_DOMAIN="${N8N_DOMAIN:-}"
 BACKEND_BIND_PORT="${BACKEND_BIND_PORT:?BACKEND_BIND_PORT is required}"
 FRONTEND_BIND_PORT="${FRONTEND_BIND_PORT:?FRONTEND_BIND_PORT is required}"
 N8N_BIND_PORT="${N8N_BIND_PORT:?N8N_BIND_PORT is required}"
+BITNET_BIND_PORT="${BITNET_BIND_PORT:-8080}"
 NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
 NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://${DOMAIN}}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}"
+BITNET_MODEL_REPO="${BITNET_MODEL_REPO:-1bitLLM/bitnet_b1_58-large}"
+BITNET_MODEL_DIR_NAME="${BITNET_MODEL_DIR_NAME:-bitnet_b1_58-large}"
+BITNET_QUANT_TYPE="${BITNET_QUANT_TYPE:-i2_s}"
+BITNET_USE_PRETUNED="${BITNET_USE_PRETUNED:-1}"
+BITNET_THREADS="${BITNET_THREADS:-4}"
+BITNET_CTX_SIZE="${BITNET_CTX_SIZE:-4096}"
+BITNET_TEMPERATURE="${BITNET_TEMPERATURE:-0.7}"
+BITNET_N_PREDICT="${BITNET_N_PREDICT:-1024}"
 SERVER_NAMES="${DOMAIN}${AI_DOMAIN:+ ${AI_DOMAIN}}"
 
 require_backend_env() {
@@ -122,10 +131,19 @@ APP_ENV=${APP_ENV}
 BACKEND_BIND_PORT=${BACKEND_BIND_PORT}
 FRONTEND_BIND_PORT=${FRONTEND_BIND_PORT}
 N8N_BIND_PORT=${N8N_BIND_PORT}
+BITNET_BIND_PORT=${BITNET_BIND_PORT}
 GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
 NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 LETSENCRYPT_ROOT_DIR=/etc/letsencrypt
+BITNET_MODEL_REPO=${BITNET_MODEL_REPO}
+BITNET_MODEL_DIR_NAME=${BITNET_MODEL_DIR_NAME}
+BITNET_QUANT_TYPE=${BITNET_QUANT_TYPE}
+BITNET_USE_PRETUNED=${BITNET_USE_PRETUNED}
+BITNET_THREADS=${BITNET_THREADS}
+BITNET_CTX_SIZE=${BITNET_CTX_SIZE}
+BITNET_TEMPERATURE=${BITNET_TEMPERATURE}
+BITNET_N_PREDICT=${BITNET_N_PREDICT}
 EOF
   mv "${compose_tmp}" "${ROOT_DIR}/.env.compose"
 }
@@ -213,8 +231,9 @@ N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 N8N_RUNNERS_ENABLED=true
 N8N_DIAGNOSTICS_ENABLED=false
 N8N_PERSONALIZATION_ENABLED=false
+N8N_CUSTOM_EXTENSIONS=/opt/n8n-custom/node_modules
 NODE_FUNCTION_ALLOW_BUILTIN=*
-NODE_FUNCTION_ALLOW_EXTERNAL=axios,lodash,dayjs,moment,uuid,zod,cheerio
+NODE_FUNCTION_ALLOW_EXTERNAL=axios,lodash,dayjs,moment,uuid,zod,cheerio,openai,@voiddb/orm
 GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
 TZ=${GENERIC_TIMEZONE:-Asia/Yekaterinburg}
 N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
@@ -323,7 +342,7 @@ deploy_stack() {
   export DOCKER_BUILDKIT=1
   export COMPOSE_DOCKER_CLI_BUILD=1
 
-  "${compose_cmd[@]}" up -d --build --remove-orphans ollama backend frontend n8n
+  "${compose_cmd[@]}" up -d --build --remove-orphans bitnet ollama backend frontend n8n
 
   local backend_url="http://127.0.0.1:${BACKEND_BIND_PORT}/"
   local frontend_url="http://127.0.0.1:${FRONTEND_BIND_PORT}/"
@@ -354,6 +373,22 @@ deploy_stack() {
     echo "Frontend did not become healthy: ${frontend_url}" >&2
     "${compose_cmd[@]}" ps >&2 || true
     "${compose_cmd[@]}" logs --tail=200 frontend >&2 || true
+    exit 1
+  fi
+
+  local bitnet_url="http://127.0.0.1:${BITNET_BIND_PORT}/v1/models"
+
+  for attempt in {1..48}; do
+    if curl -fsS "${bitnet_url}" >/dev/null; then
+      break
+    fi
+    sleep 5
+  done
+
+  if ! curl -fsS "${bitnet_url}" >/dev/null; then
+    echo "BitNet did not become healthy: ${bitnet_url}" >&2
+    "${compose_cmd[@]}" ps >&2 || true
+    "${compose_cmd[@]}" logs --tail=200 bitnet >&2 || true
     exit 1
   fi
 

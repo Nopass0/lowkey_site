@@ -18,6 +18,8 @@ type StoredAiSettings = {
   updatedAt?: string;
 };
 
+const LOCAL_PROVIDERS = ["ollama", "lmstudio"];
+
 export type OpenRouterSettings = {
   provider: "openrouter";
   apiKey: string;
@@ -129,6 +131,7 @@ export async function getPublicAiSettings() {
 export async function saveAiSettings(input: {
   apiKey?: string;
   clearApiKey?: boolean;
+  provider?: string;
   model?: string;
   baseUrl?: string;
   siteUrl?: string;
@@ -138,13 +141,18 @@ export async function saveAiSettings(input: {
 }) {
   const existing = await getStoredAiSettings();
   const current = resolveSettings(existing);
-  const nextApiKey = input.clearApiKey
-    ? ""
-    : (typeof input.apiKey === "string" && input.apiKey.trim()) || existing?.openRouterApiKey || "";
+  const nextProvider = input.provider || existing?.provider || "openrouter";
+  const isLocalProvider = LOCAL_PROVIDERS.includes(nextProvider);
+  // Local providers (ollama, lmstudio) don't require an API key
+  const nextApiKey = isLocalProvider
+    ? (existing?.openRouterApiKey || "")
+    : input.clearApiKey
+      ? ""
+      : (typeof input.apiKey === "string" && input.apiKey.trim()) || existing?.openRouterApiKey || "";
 
   const payload = {
     key: AI_SETTINGS_KEY,
-    provider: "openrouter",
+    provider: nextProvider,
     openRouterApiKey: nextApiKey,
     openRouterModel: normalizedString(input.model, current.model),
     openRouterBaseUrl: normalizedString(input.baseUrl, current.baseUrl),

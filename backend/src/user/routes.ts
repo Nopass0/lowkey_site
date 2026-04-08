@@ -270,6 +270,39 @@ export const userRoutes = new Elysia({ prefix: "/user" })
     }
   })
 
+  // ─── POST /user/device-info ───────────────────────────
+  .post(
+    "/device-info",
+    async ({ user, body }) => {
+      await db.user.update({
+        where: { id: user.userId },
+        data: {
+          lastAndroidVersion: body.appVersion,
+          lastAndroidSeenAt: new Date(),
+          lastAndroidDevice: `${body.manufacturer} ${body.model} (Android ${body.androidVersion})`,
+          lastAndroidLocale: body.locale,
+          lastAndroidTimezone: body.timezone,
+          lastAndroidLat: body.latitude ?? null,
+          lastAndroidLng: body.longitude ?? null,
+        },
+      }).catch(() => {/* fields may not exist yet in older VoidDB, ignore */});
+      return { ok: true };
+    },
+    {
+      body: t.Object({
+        model: t.String(),
+        manufacturer: t.String(),
+        androidVersion: t.String(),
+        sdkInt: t.Number(),
+        appVersion: t.String(),
+        locale: t.String(),
+        timezone: t.String(),
+        latitude:  t.Optional(t.Number()),
+        longitude: t.Optional(t.Number()),
+      }),
+    },
+  )
+
   // ─── GET /user/transactions ────────────────────────────
   .get(
     "/transactions",

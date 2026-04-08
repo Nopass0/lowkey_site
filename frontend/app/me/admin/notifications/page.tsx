@@ -1,48 +1,104 @@
 "use client";
 
-import { useState } from "react";
-import { Bell, Send, Users, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bell, Loader2, Search, Send, User, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { apiClient } from "@/api/client";
+import type { AdminUser } from "@/api/types";
 
 export default function AdminNotificationsPage() {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [userId, setUserId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; sent?: number; error?: string } | null>(null);
 
+  // ── User search ─────────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<AdminUser[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const searchUsers = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const data = await apiClient.get<{ items: AdminUser[]; total: number }>(
+        "/admin/users",
+        { search: q, pageSize: 8, page: 1 },
+      );
+      setSearchResults(data.items ?? []);
+      setShowDropdown(true);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  function handleSearchInput(v: string) {
+    setSearchQuery(v);
+    if (selectedUser) setSelectedUser(null);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => searchUsers(v), 300);
+  }
+
+  function selectUser(u: AdminUser) {
+    setSelectedUser(u);
+    setSearchQuery(u.login);
+    setShowDropdown(false);
+    setSearchResults([]);
+  }
+
+  function clearUser() {
+    setSelectedUser(null);
+    setSearchQuery("");
+    setSearchResults([]);
+    setShowDropdown(false);
+  }
+
+  // ── Send ─────────────────────────────────────────────────────────────────────
   async function send(toAll: boolean) {
     if (!title.trim() || !message.trim()) return;
-    if (!toAll && !userId.trim()) return;
+    if (!toAll && !selectedUser) return;
 
     setIsLoading(true);
     setResult(null);
     try {
-      const res = await fetch("/api/admin/notifications/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-        },
-        body: JSON.stringify({
+      const data = await apiClient.post<{ ok: boolean; sent?: number }>(
+        "/admin/notifications/send",
+        {
           title: title.trim(),
           message: message.trim(),
-          userIds: toAll ? undefined : [userId.trim()],
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setResult({ ok: true, sent: data.sent });
-        setTitle("");
-        setMessage("");
-        setUserId("");
-      } else {
-        setResult({ ok: false, error: data.message ?? "Ошибка" });
-      }
-    } catch (e) {
-      setResult({ ok: false, error: String(e) });
+          userIds: toAll ? undefined : [selectedUser!.id],
+        },
+      );
+      setResult({ ok: true, sent: data.sent });
+      setTitle("");
+      setMessage("");
+      clearUser();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setResult({ ok: false, error: msg });
     } finally {
       setIsLoading(false);
     }
@@ -63,6 +119,7 @@ export default function AdminNotificationsPage() {
       </div>
 
       <div className="bg-card border border-border/60 rounded-[2rem] p-8 space-y-6">
+        {/* Title */}
         <div className="space-y-3">
           <label className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
             Заголовок
@@ -74,6 +131,7 @@ export default function AdminNotificationsPage() {
           />
         </div>
 
+        {/* Message */}
         <div className="space-y-3">
           <label className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
             Текст
@@ -86,17 +144,69 @@ export default function AdminNotificationsPage() {
           />
         </div>
 
-        <div className="space-y-3">
+        {/* User search */}
+        <div className="space-y-3" ref={searchRef}>
           <label className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Конкретный пользователь (ID или пусто = всем)
+            Получатель (пусто = всем)
           </label>
-          <Input
-            placeholder="UUID пользователя (оставьте пустым для всех)"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-          />
+          <div className="relative">
+            <div className="relative flex items-center">
+              {isSearching ? (
+                <Loader2 className="absolute left-3 w-4 h-4 text-muted-foreground animate-spin" />
+              ) : (
+                <Search className="absolute left-3 w-4 h-4 text-muted-foreground" />
+              )}
+              <Input
+                className="pl-9 pr-9"
+                placeholder="Поиск по логину..."
+                value={searchQuery}
+                onChange={(e) => handleSearchInput(e.target.value)}
+                onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+              />
+              {(searchQuery || selectedUser) && (
+                <button
+                  onClick={clearUser}
+                  className="absolute right-3 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {showDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-xl shadow-lg overflow-hidden">
+                {searchResults.map((u) => (
+                  <button
+                    key={u.id}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-accent text-left transition-colors"
+                    onMouseDown={(e) => { e.preventDefault(); selectUser(u); }}
+                  >
+                    <User className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm truncate">{u.login}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.id}</p>
+                    </div>
+                    {u.plan && (
+                      <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">
+                        {u.plan}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedUser && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              Выбран: <span className="font-semibold text-foreground">{selectedUser.login}</span>
+              <span className="text-xs opacity-60">({selectedUser.id})</span>
+            </div>
+          )}
         </div>
 
+        {/* Result */}
         {result && (
           <div
             className={`rounded-xl px-4 py-3 text-sm font-semibold ${
@@ -111,13 +221,14 @@ export default function AdminNotificationsPage() {
           </div>
         )}
 
+        {/* Buttons */}
         <div className="flex gap-3 pt-2">
           <Button
             className="flex-1 gap-2"
-            disabled={isLoading || !title.trim() || !message.trim() || !userId.trim()}
+            disabled={isLoading || !title.trim() || !message.trim() || !selectedUser}
             onClick={() => send(false)}
           >
-            <User className="w-4 h-4" />
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
             Отправить пользователю
           </Button>
           <Button
@@ -126,7 +237,7 @@ export default function AdminNotificationsPage() {
             disabled={isLoading || !title.trim() || !message.trim()}
             onClick={() => send(true)}
           >
-            <Users className="w-4 h-4" />
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
             Отправить всем
           </Button>
         </div>
@@ -135,8 +246,8 @@ export default function AdminNotificationsPage() {
       <div className="bg-card border border-border/60 rounded-[2rem] p-6">
         <p className="text-sm text-muted-foreground">
           <strong>Как работает:</strong> Уведомления доставляются через polling — приложение
-          проверяет сервер каждые 15 минут (пока есть интернет). Пользователь увидит
-          уведомление в статусной строке Android в течение 15 минут.
+          проверяет сервер каждые ~60 секунд пока открыто, или каждые 15 минут в фоне.
+          Пользователь увидит уведомление в статусной строке Android.
         </p>
       </div>
     </div>

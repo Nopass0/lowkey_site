@@ -3,6 +3,8 @@ import { jwt } from "@elysiajs/jwt";
 import { config } from "../config";
 import { db } from "../db";
 import { callOpenRouter } from "../ai/openrouter";
+import { optimizeImageUpload } from "../media";
+import { nanoid } from "nanoid";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +98,160 @@ async function enrichMembers(members: any[]) {
 
 export const socialRoutes = new Elysia({ prefix: "/social" })
   .use(jwt({ name: "jwt", secret: config.jwtSecret }))
+
+  // =========================================================================
+  // MEDIA UPLOAD + PROXY
+  // =========================================================================
+
+  // Upload any file (image, video, attachment) — returns a proxied backend URL
+  .post("/upload", async ({ headers, jwt, set, request }) => {
+    const token = headers.authorization?.replace("Bearer ", "");
+    if (!token) { set.status = 401; return { error: "Unauthorized" }; }
+    const payload = await jwt.verify(token);
+    if (!payload) { set.status = 401; return { error: "Invalid token" }; }
+
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) { set.status = 400; return { error: "No file" }; }
+
+    const bytes = await file.arrayBuffer();
+    const contentType = file.type || "application/octet-stream";
+    const isImage = contentType.startsWith("image/");
+    const isVideo = contentType.startsWith("video/");
+    const bucket = "english-media";
+    const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
+    const key = `uploads/${nanoid(16)}.${isImage ? "webp" : ext}`;
+
+    let buffer = new Uint8Array(bytes);
+    let finalContentType = contentType;
+
+    if (isImage) {
+      try {
+        const optimized = await optimizeImageUpload(buffer, { width: 1920, height: 1080, quality: 85 });
+        buffer = optimized.buffer as Uint8Array;
+        finalContentType = optimized.contentType;
+      } catch { /* use original */ }
+    }
+
+    // Upload to VoidDB S3 bucket
+    const baseUrl = config.voiddb.url.replace(/\/$/, "");
+    const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+
+    // Get auth token for VoidDB
+    let voidToken = config.voiddb.token;
+    if (!voidToken && config.voiddb.username) {
+      try {
+        const loginRes = await fetch(`${baseUrl}/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: config.voiddb.username, password: config.voiddb.password }),
+        });
+        const loginData = await loginRes.json();
+        voidToken = loginData.access_token || loginData.token || loginData.accessToken || "";
+      } catch { /* continue */ }
+    }
+
+    // Ensure bucket exists
+    try {
+      await fetch(`${baseUrl}/s3/${encodeURIComponent(bucket)}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${voidToken}` },
+      });
+    } catch { /* may already exist */ }
+
+    // Upload file
+    const uploadRes = await fetch(`${baseUrl}/s3/${encodeURIComponent(bucket)}/${encodedKey}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${voidToken}`,
+        "Content-Type": finalContentType,
+      },
+      body: buffer,
+    });
+
+    if (!uploadRes.ok) {
+      set.status = 500;
+      return { error: "Upload failed" };
+    }
+
+    // Return a proxied URL via Next.js rewrite (/api → backend)
+    // The URL /api/social/media/... is accessible from the browser through Next.js proxy
+    const url = `/api/social/media/${encodeURIComponent(bucket)}/${encodedKey}`;
+    return { url, contentType: finalContentType, isImage, isVideo };
+  })
+
+  // Proxy: serve a media file from VoidDB S3 (keeps VoidDB token server-side)
+  .get("/media/:bucket/:key", async ({ params, set, headers: reqHeaders }) => {
+    const bucket = params.bucket;
+    const key = (params as any)["key"];
+    if (!bucket || !key) { set.status = 400; return; }
+
+    const baseUrl = config.voiddb.url.replace(/\/$/, "");
+    let voidToken = config.voiddb.token;
+    if (!voidToken && config.voiddb.username) {
+      try {
+        const loginRes = await fetch(`${baseUrl}/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: config.voiddb.username, password: config.voiddb.password }),
+        });
+        const loginData = await loginRes.json() as any;
+        voidToken = loginData.access_token || loginData.token || loginData.accessToken || "";
+      } catch { /* continue */ }
+    }
+
+    const s3Url = `${baseUrl}/s3/${encodeURIComponent(bucket)}/${key}`;
+    const res = await fetch(s3Url, {
+      headers: { Authorization: `Bearer ${voidToken}` },
+    });
+
+    if (!res.ok) { set.status = res.status; return; }
+
+    const ct = res.headers.get("content-type") || "application/octet-stream";
+    const body = await res.arrayBuffer();
+    set.headers = {
+      "Content-Type": ct,
+      "Cache-Control": "public, max-age=31536000, immutable",
+    };
+    return new Response(body, { status: 200, headers: { "Content-Type": ct } });
+  })
+
+  // Also handle multi-segment keys
+  .get("/media/:bucket/*", async ({ params, set }) => {
+    const bucket = params.bucket;
+    const key = (params as any)["*"];
+    if (!bucket || !key) { set.status = 400; return; }
+
+    const baseUrl = config.voiddb.url.replace(/\/$/, "");
+    let voidToken = config.voiddb.token;
+    if (!voidToken && config.voiddb.username) {
+      try {
+        const loginRes = await fetch(`${baseUrl}/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: config.voiddb.username, password: config.voiddb.password }),
+        });
+        const loginData = await loginRes.json() as any;
+        voidToken = loginData.access_token || loginData.token || loginData.accessToken || "";
+      } catch { /* continue */ }
+    }
+
+    // key might already be encoded
+    const s3Url = `${baseUrl}/s3/${encodeURIComponent(bucket)}/${key}`;
+    const res = await fetch(s3Url, {
+      headers: { Authorization: `Bearer ${voidToken}` },
+    });
+
+    if (!res.ok) { set.status = res.status; return; }
+
+    const ct = res.headers.get("content-type") || "application/octet-stream";
+    const body = await res.arrayBuffer();
+    set.headers = {
+      "Content-Type": ct,
+      "Cache-Control": "public, max-age=31536000, immutable",
+    };
+    return new Response(body, { status: 200, headers: { "Content-Type": ct } });
+  })
 
   // =========================================================================
   // LEADERBOARD
@@ -932,4 +1088,150 @@ Example:
     });
 
     return { blocks: created };
+  })
+
+  // =========================================================================
+  // PUBLIC COURSES CATALOG
+  // =========================================================================
+
+  // GET /social/public/courses — list all published courses from public groups
+  .get("/public/courses", async ({ headers, query, jwt, set }) => {
+    await getUser(headers, jwt, set);
+    const search = (query as any).search || "";
+    const level = (query as any).level || "";
+    const page = Math.max(1, parseInt((query as any).page || "1"));
+    const limit = Math.min(100, parseInt((query as any).limit || "12"));
+    const offset = (page - 1) * limit;
+
+    // Get all public groups
+    const publicGroups = await db.findMany("EnglishGroups", {
+      filters: [db.filter.eq("isPublic", true)],
+      limit: 500,
+    });
+    const publicGroupIds = publicGroups.map((g: any) => g.id);
+
+    // Get courses from public groups that are published
+    let allCourses: any[] = [];
+    for (const gid of publicGroupIds) {
+      const courses = await db.findMany("EnglishCourses", {
+        filters: [
+          db.filter.eq("groupId", gid),
+          db.filter.eq("isPublished", true),
+        ],
+        limit: 100,
+      });
+      allCourses = allCourses.concat(courses.map((c: any) => ({
+        ...c,
+        groupName: publicGroups.find((g: any) => g.id === gid)?.name || "",
+        groupEmoji: publicGroups.find((g: any) => g.id === gid)?.emoji || "📚",
+      })));
+    }
+
+    // Filter by search / level
+    if (search) {
+      const q = search.toLowerCase();
+      allCourses = allCourses.filter((c: any) =>
+        c.title?.toLowerCase().includes(q) ||
+        c.description?.toLowerCase().includes(q)
+      );
+    }
+    if (level) {
+      allCourses = allCourses.filter((c: any) => c.level === level);
+    }
+
+    allCourses.sort((a: any, b: any) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const total = allCourses.length;
+    const paginated = allCourses.slice(offset, offset + limit);
+
+    return { courses: paginated, total, page, limit, totalPages: Math.ceil(total / limit) };
+  })
+
+  // GET /social/public/courses/:groupId/:courseId — single public course
+  .get("/public/courses/:groupId/:courseId", async ({ headers, params, jwt, set }) => {
+    await getUser(headers, jwt, set);
+    const course = await db.findOne("EnglishCourses", [db.filter.eq("id", params.courseId)]);
+    if (!course || !course.isPublished) { set.status = 404; return { error: "Not found" }; }
+    const group = await db.findOne("EnglishGroups", [db.filter.eq("id", params.groupId)]);
+    if (!group?.isPublic) { set.status = 403; return { error: "Forbidden" }; }
+    const blocks = await db.findMany("EnglishCourseBlocks", {
+      filters: [db.filter.eq("courseId", params.courseId)],
+      sort: [{ field: "orderIndex", direction: "asc" }],
+      limit: 200,
+    });
+    return { ...course, blocks, groupName: group.name, groupEmoji: group.emoji };
+  })
+
+  // =========================================================================
+  // PUBLIC TESTS CATALOG
+  // =========================================================================
+
+  // GET /social/public/tests — list all tests from public published courses
+  .get("/public/tests", async ({ headers, query, jwt, set }) => {
+    await getUser(headers, jwt, set);
+    const search = (query as any).search || "";
+    const level = (query as any).level || "";
+    const page = Math.max(1, parseInt((query as any).page || "1"));
+    const limit = Math.min(200, parseInt((query as any).limit || "12"));
+    const offset = (page - 1) * limit;
+
+    // Get all public groups
+    const publicGroups = await db.findMany("EnglishGroups", {
+      filters: [db.filter.eq("isPublic", true)],
+      limit: 500,
+    });
+    const publicGroupIds = publicGroups.map((g: any) => g.id);
+
+    // Get courses from public groups
+    let allCourses: any[] = [];
+    for (const gid of publicGroupIds) {
+      const courses = await db.findMany("EnglishCourses", {
+        filters: [db.filter.eq("groupId", gid), db.filter.eq("isPublished", true)],
+        limit: 100,
+      });
+      allCourses = allCourses.concat(courses);
+    }
+    const courseIds = allCourses.map((c: any) => c.id);
+
+    // Get tests for these courses
+    let allTests: any[] = [];
+    for (const cid of courseIds) {
+      const tests = await db.findMany("EnglishCourseTests", {
+        filters: [db.filter.eq("courseId", cid)],
+        limit: 100,
+      });
+      const course = allCourses.find((c: any) => c.id === cid);
+      const group = publicGroups.find((g: any) => g.id === course?.groupId);
+      allTests = allTests.concat(tests.map((t: any) => ({
+        ...t,
+        courseTitle: course?.title || "",
+        courseLevel: course?.level || "beginner",
+        groupName: group?.name || "",
+        groupId: course?.groupId || "",
+        questionCount: Array.isArray(t.questions) ? t.questions.length : 0,
+      })));
+    }
+
+    if (search) {
+      const q = search.toLowerCase();
+      allTests = allTests.filter((t: any) =>
+        t.title?.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        t.courseTitle?.toLowerCase().includes(q)
+      );
+    }
+    if (level) {
+      allTests = allTests.filter((t: any) => t.courseLevel === level);
+    }
+
+    allTests.sort((a: any, b: any) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const total = allTests.length;
+    const paginated = allTests.slice(offset, offset + limit);
+
+    return { tests: paginated, total, page, limit, totalPages: Math.ceil(total / limit) };
   });

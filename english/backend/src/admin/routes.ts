@@ -67,6 +67,7 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
     body: t.Object({
       apiKey: t.Optional(t.String()),
       clearApiKey: t.Optional(t.Boolean()),
+      provider: t.Optional(t.String()),
       model: t.Optional(t.String()),
       baseUrl: t.Optional(t.String()),
       siteUrl: t.Optional(t.String()),
@@ -266,6 +267,233 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
       count: payments.length,
       byDay,
     };
+  })
+
+  // ─── Standalone public tests ───────────────────────────────────────────────
+
+  .get("/tests", async ({ headers, query, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const tests = await db.findMany("EnglishCourseTests", {
+      sort: [{ field: "createdAt", direction: "desc" }],
+      limit: parseInt(query.limit || "100"),
+    });
+    const courseIds = [...new Set(tests.map((t: any) => t.courseId).filter(Boolean))];
+    const courses = courseIds.length
+      ? await Promise.all(courseIds.map((id) => db.findOne("EnglishCourses", [db.filter.eq("id", id)])))
+      : [];
+    const courseMap = new Map(courses.filter(Boolean).map((c: any) => [c.id, c]));
+    const groupIds = [...new Set(courses.filter(Boolean).map((c: any) => c.groupId).filter(Boolean))];
+    const groups = groupIds.length
+      ? await Promise.all(groupIds.map((id) => db.findOne("EnglishGroups", [db.filter.eq("id", id)])))
+      : [];
+    const groupMap = new Map(groups.filter(Boolean).map((g: any) => [g.id, g]));
+    return tests.map((test: any) => {
+      const course = courseMap.get(test.courseId);
+      const groupId = course?.groupId || test.groupId || null;
+      return {
+        ...test,
+        courseTitle: course?.title || null,
+        groupId,
+        groupName: groupMap.get(groupId)?.name || null,
+      };
+    });
+  })
+
+  .post("/tests", async ({ headers, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const now = new Date().toISOString();
+    const test = await db.create("EnglishCourseTests", {
+      groupId: "admin",
+      courseId: "public",
+      ...body,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return test;
+  }, {
+    body: t.Object({
+      title: t.String(),
+      description: t.Optional(t.String()),
+      questions: t.Array(t.Any()),
+      passingScore: t.Optional(t.Number()),
+      timeLimitSeconds: t.Optional(t.Number()),
+      maxAttempts: t.Optional(t.Number()),
+      allowRetry: t.Optional(t.Boolean()),
+      pointsPerQuestion: t.Optional(t.Number()),
+      isPublic: t.Optional(t.Boolean()),
+    }),
+  })
+
+  .patch("/tests/:id", async ({ headers, params, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const test = await db.findOne("EnglishCourseTests", [db.filter.eq("id", params.id)]);
+    if (!test) { set.status = 404; return { error: "Not found" }; }
+    const updated = await db.update("EnglishCourseTests", params.id, {
+      ...body,
+      updatedAt: new Date().toISOString(),
+    });
+    return updated;
+  }, {
+    body: t.Object({
+      title: t.Optional(t.String()),
+      questions: t.Optional(t.Array(t.Any())),
+      passingScore: t.Optional(t.Number()),
+      timeLimitSeconds: t.Optional(t.Number()),
+      maxAttempts: t.Optional(t.Number()),
+      allowRetry: t.Optional(t.Boolean()),
+      pointsPerQuestion: t.Optional(t.Number()),
+      isPublic: t.Optional(t.Boolean()),
+    }),
+  })
+
+  .delete("/tests/:id", async ({ headers, params, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const test = await db.findOne("EnglishCourseTests", [db.filter.eq("id", params.id)]);
+    if (!test) { set.status = 404; return { error: "Not found" }; }
+    await db.delete("EnglishCourseTests", params.id);
+    return { message: "Test deleted" };
+  })
+
+  .post("/tests/:id/submit", async ({ headers, params, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const test = await db.findOne("EnglishCourseTests", [db.filter.eq("id", params.id)]);
+    if (!test) { set.status = 404; return { error: "Not found" }; }
+
+    const { answers, timeTakenSeconds } = body as any;
+    const questions: any[] = test.questions || [];
+    let correctCount = 0;
+
+    const graded = (answers || []).map((a: any) => {
+      const question = questions.find((q: any) => q.id === a.questionId || q.id === a.id);
+      const type = question?.type || question?.questionType;
+      const correct = question?.correctAnswer ?? question?.answer;
+      let isCorrect = false;
+      if (question) {
+        if (type === "single_choice" || type === "fill_blank" || type === "text_input") {
+          isCorrect = String(a.answer).trim().toLowerCase() === String(correct).trim().toLowerCase();
+        } else if (type === "multiple_choice") {
+          const ua = Array.isArray(a.answer) ? [...a.answer].sort() : [a.answer].sort();
+          const ca = Array.isArray(correct) ? [...correct].sort() : [correct].sort();
+          isCorrect = JSON.stringify(ua) === JSON.stringify(ca);
+        } else if (type === "match" || type === "order") {
+          const ua = Array.isArray(a.answer) ? a.answer : [];
+          const ca = Array.isArray(correct) ? correct : [];
+          isCorrect = JSON.stringify(ua) === JSON.stringify(ca);
+        }
+      }
+      if (isCorrect) correctCount++;
+      return {
+        questionId: a.questionId || a.id,
+        userAnswer: a.answer,
+        correct: isCorrect,
+        correctAnswer: question?.correctAnswer ?? question?.answer,
+      };
+    });
+
+    const total = questions.length;
+    const score = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    const passed = score >= (test.passingScore || 70);
+
+    return { score, passed, correctCount, total, graded, timeTakenSeconds: timeTakenSeconds || 0 };
+  })
+
+  // ─── Deck management (extended) ─────────────────────────────────────────────
+
+  .post("/template-decks", async ({ headers, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const now = new Date().toISOString();
+    const deck = await db.create("EnglishDecks", {
+      ...body,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return attachDeckOwner(deck);
+  }, {
+    body: t.Object({
+      name: t.String(),
+      description: t.Optional(t.String()),
+      emoji: t.Optional(t.String()),
+      isPublic: t.Optional(t.Boolean()),
+    }),
+  })
+
+  .delete("/template-decks/:id", async ({ headers, params, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", params.id)]);
+    if (!deck) { set.status = 404; return { error: "Not found" }; }
+    // Delete all cards belonging to this deck
+    const cards = await db.findMany("EnglishCards", {
+      filters: [db.filter.eq("deckId", params.id)],
+      limit: 10000,
+    });
+    await Promise.all(cards.map((c: any) => db.delete("EnglishCards", c.id)));
+    await db.delete("EnglishDecks", params.id);
+    return { message: "Deck and all its cards deleted" };
+  })
+
+  .get("/template-decks/:id/cards", async ({ headers, params, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", params.id)]);
+    if (!deck) { set.status = 404; return { error: "Not found" }; }
+    const cards = await db.findMany("EnglishCards", {
+      filters: [db.filter.eq("deckId", params.id)],
+      sort: [{ field: "createdAt", direction: "asc" }],
+      limit: 10000,
+    });
+    return cards;
+  })
+
+  .post("/template-decks/:id/cards", async ({ headers, params, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const deck = await db.findOne("EnglishDecks", [db.filter.eq("id", params.id)]);
+    if (!deck) { set.status = 404; return { error: "Not found" }; }
+    const now = new Date().toISOString();
+    const card = await db.create("EnglishCards", {
+      deckId: params.id,
+      ...body,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // Bump deck updatedAt
+    await db.update("EnglishDecks", params.id, { updatedAt: now });
+    return card;
+  }, {
+    body: t.Object({
+      front: t.String(),
+      back: t.String(),
+      example: t.Optional(t.String()),
+    }),
+  })
+
+  .patch("/template-decks/:id/cards/:cardId", async ({ headers, params, body, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const card = await db.findOne("EnglishCards", [
+      db.filter.eq("id", params.cardId),
+      db.filter.eq("deckId", params.id),
+    ]);
+    if (!card) { set.status = 404; return { error: "Not found" }; }
+    const updated = await db.update("EnglishCards", params.cardId, {
+      ...body,
+      updatedAt: new Date().toISOString(),
+    });
+    return updated;
+  }, {
+    body: t.Object({
+      front: t.Optional(t.String()),
+      back: t.Optional(t.String()),
+      example: t.Optional(t.String()),
+    }),
+  })
+
+  .delete("/template-decks/:id/cards/:cardId", async ({ headers, params, jwt, set }) => {
+    await getAdmin(headers, jwt, set);
+    const card = await db.findOne("EnglishCards", [
+      db.filter.eq("id", params.cardId),
+      db.filter.eq("deckId", params.id),
+    ]);
+    if (!card) { set.status = 404; return { error: "Not found" }; }
+    await db.delete("EnglishCards", params.cardId);
+    return { message: "Card deleted" };
   })
 
   // Broadcast message via Telegram
