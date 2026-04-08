@@ -29,6 +29,12 @@ apt-get install -y nginx certbot python3-certbot-nginx
 systemctl enable docker
 systemctl restart docker
 systemctl enable nginx
-systemctl restart nginx
+
+# Do not force-start nginx during provisioning. The deploy step writes the
+# final site config and validates it before reloading the service.
+if systemctl is-active --quiet nginx; then
+  nginx -t
+  systemctl reload nginx
+fi
 
 mkdir -p /var/www/certbot
