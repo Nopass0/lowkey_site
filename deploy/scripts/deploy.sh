@@ -344,7 +344,7 @@ deploy_stack() {
 
   # Keep the public site and API deploy independent from optional AI services.
   # BitNet/N8N are expensive and can fail independently without taking prod down.
-  "${compose_cmd[@]}" up -d --build --remove-orphans ollama backend frontend
+  "${compose_cmd[@]}" up -d --build --remove-orphans backend frontend
 
   local backend_url="http://127.0.0.1:${BACKEND_BIND_PORT}/"
   local frontend_url="http://127.0.0.1:${FRONTEND_BIND_PORT}/"
@@ -378,7 +378,6 @@ deploy_stack() {
     exit 1
   fi
 
-  "${compose_cmd[@]}" exec -T ollama ollama pull "${AI_LOCAL_MODEL:-qwen3.5:0.8b}" || true
 }
 
 ensure_server_packages
