@@ -82,7 +82,6 @@ function buildVlessLink(
       );
     }
     if (
-      !isAndroidClient &&
       normalized.includes("security=reality") &&
       !normalized.includes("packetEncoding=")
     ) {
