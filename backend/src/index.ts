@@ -56,8 +56,8 @@ import { adminClientNotificationRoutes, clientNotificationRoutes } from "./admin
  * @returns {void}
  */
 function startServerMonitor(): void {
-  const INTERVAL_MS = 2 * 60 * 1000; // run every 2 minutes
-  const TIMEOUT_MS = 2 * 60 * 1000; // server is "dead" if silent for >2 min
+  const INTERVAL_MS = 60 * 1000; // run every 1 minute
+  const TIMEOUT_MS = 5 * 60 * 1000; // server is "dead" if silent for >5 min
 
   setInterval(async () => {
     try {
