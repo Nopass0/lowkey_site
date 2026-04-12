@@ -529,7 +529,7 @@ func (s *SocksServer) sendHeartbeat(ctx context.Context) {
 		return
 	}
 	payload, _ := json.Marshal(map[string]interface{}{
-		"serverID":          s.serverID,
+		"serverId":          s.serverID,
 		"currentLoad":       0,
 		"activeConnections": s.activeCount.Load(),
 	})

@@ -339,7 +339,7 @@ func (h *VoidDBHooks) SendHeartbeat(ctx context.Context) error {
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{
-		"serverID":          h.serverID,
+		"serverId":          h.serverID,
 		"currentLoad":       0,
 		"activeConnections": h.activeCount.Load(),
 	})
