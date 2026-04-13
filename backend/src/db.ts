@@ -70,6 +70,8 @@ export interface PrismaLikeClient {
   vpnDomainStats: PrismaDelegate;
   mtprotoSettings: PrismaDelegate;
   pushNotification: PrismaDelegate;
+  clientNotification: PrismaDelegate;
+  clientLog: PrismaDelegate;
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: PrismaLikeClient) => Promise<T>): Promise<T>;
   $transaction<T>(operations: Promise<T>[]): Promise<T[]>;
@@ -109,7 +111,9 @@ type ModelName =
   | "aiFile"
   | "vpnDomainStats"
   | "mtprotoSettings"
-  | "pushNotification";
+  | "pushNotification"
+  | "clientNotification"
+  | "clientLog";
 
 type RelationConfig = {
   model: ModelName;
@@ -645,6 +649,19 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
   pushNotification: {
     collection: "push_notifications",
     fields: ["id", "userId", "title", "body", "isRead", "createdAt"],
+    dateFields: ["createdAt"],
+  },
+  clientNotification: {
+    collection: "client_notifications",
+    fields: [
+      "id", "title", "message", "type", "action", "actionData",
+      "targetType", "targetValue", "deliveredTo", "readBy", "sentById", "sentAt",
+    ],
+    dateFields: ["sentAt"],
+  },
+  clientLog: {
+    collection: "client_logs",
+    fields: ["id", "userId", "level", "category", "message", "data", "createdAt"],
     dateFields: ["createdAt"],
   },
 };
@@ -1927,6 +1944,8 @@ class VoidPrismaClient implements PrismaLikeClient {
   vpnDomainStats = new VoidPrismaDelegate("vpnDomainStats");
   mtprotoSettings = new VoidPrismaDelegate("mtprotoSettings");
   pushNotification = new VoidPrismaDelegate("pushNotification");
+  clientNotification = new VoidPrismaDelegate("clientNotification");
+  clientLog = new VoidPrismaDelegate("clientLog");
 
   async $disconnect() {
     return;

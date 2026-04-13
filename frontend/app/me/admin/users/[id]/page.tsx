@@ -16,6 +16,9 @@ import {
   ArrowDownRight,
   Globe,
   Save,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
@@ -74,6 +77,11 @@ export default function AdminUserDetailsPage() {
   });
   const [isSavingVpnLimits, setIsSavingVpnLimits] = useState(false);
   const [sessionPage, setSessionPage] = useState(1);
+  const [clientLogs, setClientLogs] = useState<any[]>([]);
+  const [clientLogsTotal, setClientLogsTotal] = useState(0);
+  const [clientLogsPage, setClientLogsPage] = useState(1);
+  const [clientLogsLoading, setClientLogsLoading] = useState(false);
+  const [logsExpanded, setLogsExpanded] = useState(false);
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -90,6 +98,22 @@ export default function AdminUserDetailsPage() {
       }
     }
   }, [endDate, fetchUserStats, id, startDate]);
+
+  const loadClientLogs = useCallback(async (page = 1) => {
+    setClientLogsLoading(true);
+    try {
+      const res = await apiClient.get<{ logs: any[]; total: number; page: number }>(
+        `/admin/users/${id}/client-logs?page=${page}&limit=50`,
+      );
+      setClientLogs(res.logs ?? []);
+      setClientLogsTotal(res.total ?? 0);
+      setClientLogsPage(page);
+    } catch {
+      // ignore
+    } finally {
+      setClientLogsLoading(false);
+    }
+  }, [id]);
 
   useEffect(() => {
     void loadData();
@@ -795,6 +819,108 @@ export default function AdminUserDetailsPage() {
 
         {/* ─── Domain statistics ─────────────────────────────────────── */}
         <DomainStats domains={data.domainStats ?? []} />
+      </div>
+
+      {/* ─── Client App Logs ──────────────────────────────────────────── */}
+      <div className="bg-card border border-border/60 rounded-[2rem] overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !logsExpanded;
+            setLogsExpanded(next);
+            if (next && clientLogs.length === 0) void loadClientLogs(1);
+          }}
+          className="w-full flex items-center justify-between px-8 py-6 hover:bg-muted/20 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3">
+            <Terminal className="w-5 h-5 text-primary" />
+            <div>
+              <p className="font-black text-lg tracking-tight">Логи клиентского приложения</p>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
+                Desktop / Mobile client logs
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {clientLogsTotal > 0 && (
+              <span className="bg-primary/10 text-primary text-xs font-black px-3 py-1 rounded-full">
+                {clientLogsTotal} записей
+              </span>
+            )}
+            {logsExpanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+          </div>
+        </button>
+
+        {logsExpanded && (
+          <div className="px-8 pb-8 space-y-3 border-t border-border/40">
+            {clientLogsLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader size={32} />
+              </div>
+            ) : clientLogs.length === 0 ? (
+              <div className="rounded-[1.5rem] border border-dashed border-border/70 px-6 py-10 text-center text-sm italic text-muted-foreground mt-4">
+                Логов пока нет
+              </div>
+            ) : (
+              <div className="space-y-2 mt-4 font-mono text-xs">
+                {clientLogs.map((log) => {
+                  const levelColors: Record<string, string> = {
+                    error: "text-red-400 bg-red-500/5 border-red-500/20",
+                    warn: "text-amber-400 bg-amber-500/5 border-amber-500/20",
+                    info: "text-emerald-400 bg-emerald-500/5 border-emerald-500/20",
+                  };
+                  const cls = levelColors[log.level ?? "info"] ?? levelColors.info;
+                  return (
+                    <div
+                      key={log.id}
+                      className={`rounded-xl border px-4 py-2.5 flex flex-col gap-1 ${cls}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="uppercase font-black tracking-widest opacity-70 text-[10px] w-10 flex-shrink-0">{log.level ?? "info"}</span>
+                        <span className="opacity-50 text-[10px] flex-shrink-0">
+                          {new Date(log.createdAt).toLocaleString("ru-RU")}
+                        </span>
+                        <span className="opacity-50 text-[10px] flex-shrink-0">[{log.category ?? "app"}]</span>
+                        <span className="text-[11px] font-bold break-all">{log.message}</span>
+                      </div>
+                      {log.data && (
+                        <pre className="text-[10px] opacity-40 pl-10 whitespace-pre-wrap break-all">{log.data}</pre>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {clientLogsTotal > clientLogs.length && (
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-xs text-muted-foreground">
+                      Показано {clientLogs.length} из {clientLogsTotal}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={clientLogsPage <= 1 || clientLogsLoading}
+                        onClick={() => void loadClientLogs(clientLogsPage - 1)}
+                      >
+                        Пред.
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={clientLogs.length < 50 || clientLogsLoading}
+                        onClick={() => void loadClientLogs(clientLogsPage + 1)}
+                      >
+                        След.
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="space-y-6">
