@@ -112,6 +112,7 @@ database {
     changelog String
     downloadUrl String
     fileSizeMb Float
+    sha256 String @default("")
     downloadCount Int @default(0)
     isLatest Boolean @default(false)
     createdAt DateTime @default(now())

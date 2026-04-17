@@ -1,6 +1,7 @@
 /**
  * @fileoverview Admin app releases management routes.
- * CRUD for app releases with file upload and set-latest functionality.
+ * CRUD for app releases with file upload (MSI/APK), SHA-256 verification,
+ * and set-latest functionality.
  */
 
 import Elysia, { t } from "elysia";
@@ -9,10 +10,19 @@ import { adminMiddleware } from "../../auth/middleware";
 import { config } from "../../config";
 import { mkdir } from "fs/promises";
 import { join } from "path";
+import { createHash } from "crypto";
+
+/**
+ * Compute SHA-256 hex digest of a Buffer / ArrayBuffer.
+ */
+function sha256hex(data: ArrayBuffer): string {
+  return createHash("sha256").update(Buffer.from(data)).digest("hex");
+}
 
 /**
  * Admin app releases routes group.
- * Full CRUD for app releases including file upload and latest management.
+ * Full CRUD for app releases including MSI/APK upload, SHA-256 tracking,
+ * and latest release management.
  */
 export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
   .use(adminMiddleware)
@@ -31,6 +41,7 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
         changelog: r.changelog,
         downloadUrl: r.downloadUrl,
         fileSizeMb: r.fileSizeMb,
+        sha256: r.sha256 ?? "",
         downloadCount: r.downloadCount,
         isLatest: r.isLatest,
         createdAt: r.createdAt.toISOString(),
@@ -58,19 +69,24 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
         const uploadsDir = join(config.APP_FILES_DIR, "releases");
         await mkdir(uploadsDir, { recursive: true });
 
-        // Determine file extension
-        const ext = platform === "android" ? ".apk" : ".exe";
+        // Determine file extension: MSI for Windows, APK for Android
+        const ext = platform === "android" ? ".apk" : ".msi";
         const fileName = `${platform}-${version}${ext}`;
         const filePath = join(uploadsDir, fileName);
 
-        // Write file
+        // Read file bytes
         const buffer = await file.arrayBuffer();
+
+        // Write file
         await Bun.write(filePath, buffer);
 
         // Calculate file size in MB
         const fileSizeMb = parseFloat(
           (buffer.byteLength / (1024 * 1024)).toFixed(2),
         );
+
+        // Compute SHA-256 for integrity verification by the client updater
+        const sha256 = sha256hex(buffer);
 
         // Create download URL
         const downloadUrl = `/uploads/releases/${fileName}`;
@@ -82,6 +98,7 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
             changelog,
             downloadUrl,
             fileSizeMb,
+            sha256,
           },
         });
 
@@ -93,6 +110,7 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
           changelog: release.changelog,
           downloadUrl: release.downloadUrl,
           fileSizeMb: release.fileSizeMb,
+          sha256: release.sha256 ?? sha256,
           downloadCount: release.downloadCount,
           isLatest: release.isLatest,
           createdAt: release.createdAt.toISOString(),
@@ -128,7 +146,6 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
         }
 
         // Reset isLatest for all releases of this platform, then set this one.
-        // Use callback form so the VoidDB adapter can preserve sequencing.
         await db.$transaction(async (tx) => {
           await tx.appRelease.updateMany({
             where: { platform: release.platform },
@@ -151,6 +168,7 @@ export const adminAppRoutes = new Elysia({ prefix: "/admin/apps" })
           changelog: updated!.changelog,
           downloadUrl: updated!.downloadUrl,
           fileSizeMb: updated!.fileSizeMb,
+          sha256: updated!.sha256 ?? "",
           downloadCount: updated!.downloadCount,
           isLatest: updated!.isLatest,
           createdAt: updated!.createdAt.toISOString(),

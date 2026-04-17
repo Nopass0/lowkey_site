@@ -509,6 +509,7 @@ export interface AppRelease {
   changelog: string;
   downloadUrl: string;
   fileSizeMb: number;
+  sha256: string;
   downloadCount: number;
   isLatest: boolean;
   createdAt: string;
@@ -755,6 +756,7 @@ export interface AdminAppRelease {
   changelog: string;
   downloadUrl: string;
   fileSizeMb: number;
+  sha256: string;
   downloadCount: number;
   isLatest: boolean;
   createdAt: string;

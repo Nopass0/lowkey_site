@@ -12,6 +12,8 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
+  Hash,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,7 +36,7 @@ const platformMeta: Record<
   windows: {
     icon: Monitor,
     name: "Windows",
-    ext: ".exe",
+    ext: ".msi",
     color: "text-blue-400",
   },
 };
@@ -59,7 +61,14 @@ export default function AdminAppsPage() {
   const [uploadResult, setUploadResult] = useState<"success" | "error" | null>(
     null,
   );
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const copyHash = (id: string, hash: string) => {
+    navigator.clipboard.writeText(hash).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
 
   useEffect(() => {
     fetchReleases();
@@ -371,6 +380,21 @@ export default function AdminAppsPage() {
                     <pre className="text-xs text-muted-foreground mt-1.5 whitespace-pre-wrap font-sans leading-relaxed line-clamp-2">
                       {rel.changelog}
                     </pre>
+                  )}
+                  {rel.sha256 && (
+                    <button
+                      onClick={() => copyHash(rel.id, rel.sha256)}
+                      className="inline-flex items-center gap-1 mt-1 text-[10px] font-mono text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
+                      title="SHA-256 — нажмите, чтобы скопировать"
+                    >
+                      <Hash className="w-2.5 h-2.5 shrink-0" />
+                      <span className="truncate max-w-[220px]">{rel.sha256}</span>
+                      {copiedId === rel.id ? (
+                        <CheckCircle className="w-2.5 h-2.5 text-green-500 shrink-0" />
+                      ) : (
+                        <Copy className="w-2.5 h-2.5 shrink-0" />
+                      )}
+                    </button>
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
