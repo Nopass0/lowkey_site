@@ -15,12 +15,14 @@ async function authenticateRequest(
 ) {
   const token = headers.authorization?.replace("Bearer ", "");
   if (!token) {
+    console.warn(`[Auth] No token provided in headers. Path: ${headers['x-forwarded-uri'] || 'unknown'}`);
     set.status = 401;
     throw new Error("Unauthorized");
   }
 
   const payload = await verifyJwt(token);
   if (!payload) {
+    console.warn(`[Auth] JWT verification failed. Path: ${headers['x-forwarded-uri'] || 'unknown'}. Token starts with: ${token.substring(0, 10)}...`);
     set.status = 401;
     throw new Error("Invalid token");
   }

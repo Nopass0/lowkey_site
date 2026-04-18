@@ -10,6 +10,9 @@ import { config } from "../../config";
 
 export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules" })
   .use(adminMiddleware)
+  .onBeforeHandle(({ request }) => {
+    console.log(`[Admin] ClientRules Request: ${request.method} ${request.url}`);
+  })
 
   // GET /admin/client-rules — list all rules
   .get("/", async ({ set }) => {
@@ -19,6 +22,19 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
       });
       return { rules };
     } catch (err) {
+      console.error("[Admin][ClientRules] List error:", err);
+      set.status = 500;
+      return { message: "Failed to fetch rules" };
+    }
+  })
+  .get("", async ({ set }) => {
+    try {
+      const rules = await db.clientRule.findMany({
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      });
+      return { rules };
+    } catch (err) {
+      console.error("[Admin][ClientRules] List error:", err);
       set.status = 500;
       return { message: "Failed to fetch rules" };
     }
