@@ -13,16 +13,20 @@ async function authenticateRequest(
   headers: Record<string, string | undefined>,
   set: { status?: number | string },
 ) {
-  const token = headers.authorization?.replace("Bearer ", "");
+  // Debug logging for production: list all incoming header keys to check for stripping/renaming
+  const headerKeys = Object.keys(headers).join(", ");
+  const authHeader = headers.authorization || (headers as any).Authorization;
+  
+  const token = authHeader?.replace("Bearer ", "");
   if (!token) {
-    console.warn(`[Auth] No token provided in headers. Path: ${headers['x-forwarded-uri'] || 'unknown'}`);
+    console.warn(`[DEBUG-AUTH] No token. Keys: [${headerKeys}]. Path: ${headers['x-forwarded-uri'] || 'unknown'}`);
     set.status = 401;
     throw new Error("Unauthorized");
   }
 
   const payload = await verifyJwt(token);
   if (!payload) {
-    console.warn(`[Auth] JWT verification failed. Path: ${headers['x-forwarded-uri'] || 'unknown'}. Token starts with: ${token.substring(0, 10)}...`);
+    console.warn(`[DEBUG-AUTH] JWT Fail. Path: ${headers['x-forwarded-uri'] || 'unknown'}. Token prefix: ${token.substring(0, 10)}`);
     set.status = 401;
     throw new Error("Invalid token");
   }

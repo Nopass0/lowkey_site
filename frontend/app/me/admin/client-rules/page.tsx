@@ -65,7 +65,7 @@ export default function ClientRulesAdminPage() {
   const fetchRules = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await apiClient.get<{ rules: ClientRule[] }>("/admin/client-rules");
+      const res = await apiClient.get<{ rules: ClientRule[] }>("/admin/client-rules/");
       setRules(res.rules || []);
     } catch {
       toast.error("Не удалось загрузить правила");

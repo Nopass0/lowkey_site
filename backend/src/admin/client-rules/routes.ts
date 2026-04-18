@@ -8,14 +8,17 @@ import { db } from "../../db";
 import { adminMiddleware } from "../../auth/middleware";
 import { config } from "../../config";
 
-export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules" })
+export const adminClientRulesRoutes = new Elysia()
   .use(adminMiddleware)
   .onBeforeHandle(({ request }) => {
     console.log(`[Admin] ClientRules Request: ${request.method} ${request.url}`);
   })
 
+  // Auth ping check
+  .get("/admin/client-rules/ping", () => ({ ok: true, message: "Auth valid" }))
+
   // GET /admin/client-rules — list all rules
-  .get("/", async ({ set }) => {
+  .get("/admin/client-rules", async ({ set }) => {
     try {
       const rules = await db.clientRule.findMany({
         orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
@@ -27,7 +30,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
       return { message: "Failed to fetch rules" };
     }
   })
-  .get("", async ({ set }) => {
+  .get("/admin/client-rules/", async ({ set }) => {
     try {
       const rules = await db.clientRule.findMany({
         orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
@@ -42,7 +45,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
 
   // POST /admin/client-rules — create rule
   .post(
-    "/",
+    "/admin/client-rules",
     async ({ body, user, set }) => {
       try {
         const rule = await db.clientRule.create({
@@ -86,7 +89,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
 
   // PATCH /admin/client-rules/:id — update rule
   .patch(
-    "/:id",
+    "/admin/client-rules/:id",
     async ({ params, body, set }) => {
       try {
         const rule = await db.clientRule.update({
@@ -131,7 +134,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
 
   // DELETE /admin/client-rules/:id
   .delete(
-    "/:id",
+    "/admin/client-rules/:id",
     async ({ params, set }) => {
       try {
         await db.clientRule.delete({ where: { id: params.id } });
@@ -149,7 +152,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
   // Проксирует запрос на принудительное обновление кэша правил на JOPA-сервере.
   // JOPA-сервер обновляет кэш раз в минуту; этот эндпоинт позволяет применить
   // изменения немедленно без ожидания следующего тика.
-  .post("/jopa-refresh", async ({ set }) => {
+  .post("/admin/client-rules/jopa-refresh", async ({ set }) => {
     try {
       const resp = await fetch(`${config.JOPA_API_URL}/api/v1/admin/rules/refresh`, {
         method: "POST",
@@ -172,7 +175,7 @@ export const adminClientRulesRoutes = new Elysia({ prefix: "/admin/client-rules"
 
   // GET /admin/client-rules/jopa-status
   // Возвращает статус кэша правил JOPA-сервера: кол-во правил и время последнего обновления.
-  .get("/jopa-status", async ({ set }) => {
+  .get("/admin/client-rules/jopa-status", async ({ set }) => {
     try {
       const resp = await fetch(`${config.JOPA_API_URL}/api/v1/admin/rules/status`, {
         headers: { "X-Admin-Key": config.JOPA_ADMIN_KEY },
