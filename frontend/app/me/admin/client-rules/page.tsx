@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Save, Shield, Globe, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Trash2, Save, Shield, Globe, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,12 @@ import {
 } from "@/components/ui/select";
 import { apiClient } from "@/api/client";
 import { toast } from "sonner";
+
+interface JopaStatus {
+  rule_count: number;
+  last_refresh: string;
+  refresh_ttl_sec: number;
+}
 
 interface ClientRule {
   id: string;
@@ -53,6 +59,8 @@ export default function ClientRulesAdminPage() {
   const [editingRule, setEditingRule] = useState<Partial<ClientRule> | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [jopaStatus, setJopaStatus] = useState<JopaStatus | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchRules = useCallback(async () => {
     setIsLoading(true);
@@ -66,7 +74,32 @@ export default function ClientRulesAdminPage() {
     }
   }, []);
 
-  useEffect(() => { fetchRules(); }, [fetchRules]);
+  const fetchJopaStatus = useCallback(async () => {
+    try {
+      const res = await apiClient.get<JopaStatus>("/admin/client-rules/jopa-status");
+      setJopaStatus(res);
+    } catch {
+      // JOPA server might be unavailable — non-fatal
+    }
+  }, []);
+
+  const handleJopaRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const res = await apiClient.post<JopaStatus>("/admin/client-rules/jopa-refresh", {});
+      setJopaStatus(res);
+      toast.success(`Кэш правил обновлён — ${res.rule_count} правил загружено`);
+    } catch {
+      toast.error("Не удалось обновить кэш на JOPA-сервере");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRules();
+    fetchJopaStatus();
+  }, [fetchRules, fetchJopaStatus]);
 
   const openCreate = () => {
     setEditingRule(emptyRule());
@@ -129,7 +162,7 @@ export default function ClientRulesAdminPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Shield className="h-6 w-6" /> Правила клиентов
@@ -138,9 +171,27 @@ export default function ClientRulesAdminPage() {
             Управление трафиком на всех VPN серверах (JOPA, SOCKS, PIMPAM, Hysteria2)
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-2" /> Добавить правило
-        </Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* JOPA cache status */}
+          {jopaStatus && (
+            <div className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2 border">
+              <div className="font-medium text-foreground">JOPA-кэш</div>
+              <div>{jopaStatus.rule_count} правил · обновлён {new Date(jopaStatus.last_refresh).toLocaleTimeString("ru")}</div>
+            </div>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleJopaRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+            {isRefreshing ? "Обновление..." : "Применить на JOPA"}
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-2" /> Добавить правило
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

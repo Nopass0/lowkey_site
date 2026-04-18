@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(bunx prisma:*)",
-      "Bash(./node_modules/.bin/prisma db:*)"
+      "Bash(./node_modules/.bin/prisma db:*)",
+      "Bash(kill 623)",
+      "Bash(rm \"C:/Projects/lowkey_web/.git/index.lock\")",
+      "Bash(rm -f /c/Projects/lowkey_web/.git/index.lock)",
+      "Read(//c/Projects/lowkey_web/lowkey_client/**)"
     ]
   }
 }
