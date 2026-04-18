@@ -18,9 +18,11 @@ import { apiClient } from "@/api/client";
 import { toast } from "sonner";
 
 interface JopaStatus {
-  rule_count: number;
-  last_refresh: string;
-  refresh_ttl_sec: number;
+  available?: boolean;
+  rule_count?: number;
+  last_refresh?: string;
+  refresh_ttl_sec?: number;
+  message?: string;
 }
 
 interface ClientRule {
@@ -76,10 +78,14 @@ export default function ClientRulesAdminPage() {
 
   const fetchJopaStatus = useCallback(async () => {
     try {
+      // Бэкенд всегда возвращает 200 (даже если JOPA недоступен), поэтому
+      // apiClient не вызовет редирект на логин при недоступности JOPA-сервера.
       const res = await apiClient.get<JopaStatus>("/admin/client-rules/jopa-status");
-      setJopaStatus(res);
+      if (res.available !== false) {
+        setJopaStatus(res);
+      }
     } catch {
-      // JOPA server might be unavailable — non-fatal
+      // JOPA server недоступен — не критично, просто не показываем статус
     }
   }, []);
 
@@ -173,10 +179,13 @@ export default function ClientRulesAdminPage() {
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {/* JOPA cache status */}
-          {jopaStatus && (
+          {jopaStatus && jopaStatus.available !== false && jopaStatus.rule_count !== undefined && (
             <div className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2 border">
               <div className="font-medium text-foreground">JOPA-кэш</div>
-              <div>{jopaStatus.rule_count} правил · обновлён {new Date(jopaStatus.last_refresh).toLocaleTimeString("ru")}</div>
+              <div>
+                {jopaStatus.rule_count} правил
+                {jopaStatus.last_refresh && ` · обновлён ${new Date(jopaStatus.last_refresh).toLocaleTimeString("ru")}`}
+              </div>
             </div>
           )}
           <Button

@@ -163,8 +163,10 @@ export const adminClientRulesRoutes = new Elysia()
         signal: AbortSignal.timeout(10_000),
       });
       if (!resp.ok) {
-        set.status = resp.status;
-        return { message: `JOPA server responded with ${resp.status}` };
+        // Никогда не пробрасываем 4xx от JOPA-сервера — это вызовет редирект на логин у фронтенда.
+        // Любая ошибка от JOPA-сервера = 502 Bad Gateway от нас.
+        set.status = 502;
+        return { message: `JOPA server error: ${resp.status}` };
       }
       return await resp.json();
     } catch (err: any) {
@@ -175,19 +177,22 @@ export const adminClientRulesRoutes = new Elysia()
 
   // GET /admin/client-rules/jopa-status
   // Возвращает статус кэша правил JOPA-сервера: кол-во правил и время последнего обновления.
-  .get("/admin/client-rules/jopa-status", async ({ set }) => {
+  // Всегда возвращает 200 — если JOPA недоступен, возвращает { available: false }.
+  // Никогда не возвращает 401/403 чтобы не триггерить редирект на логин у фронтенда.
+  .get("/admin/client-rules/jopa-status", async () => {
     try {
       const resp = await fetch(`${config.JOPA_API_URL}/api/v1/admin/rules/status`, {
         headers: { "X-Admin-Key": config.JOPA_ADMIN_KEY },
         signal: AbortSignal.timeout(8_000),
       });
       if (!resp.ok) {
-        set.status = resp.status;
-        return { message: `JOPA server responded with ${resp.status}` };
+        // JOPA server вернул ошибку — возвращаем 200 с флагом недоступности
+        return { available: false, message: `JOPA server error: ${resp.status}` };
       }
-      return await resp.json();
+      const data = await resp.json();
+      return { available: true, ...data };
     } catch (err: any) {
-      set.status = 502;
-      return { message: `Cannot reach JOPA server: ${err?.message ?? err}` };
+      // JOPA сервер недоступен — не критично, возвращаем 200
+      return { available: false, message: `JOPA server unavailable: ${err?.message ?? err}` };
     }
   });
