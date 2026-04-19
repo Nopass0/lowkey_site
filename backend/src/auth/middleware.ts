@@ -13,6 +13,15 @@ async function authenticateRequest(
   headers: Record<string, string | undefined>,
   set: { status?: number | string },
 ) {
+  // 🛡️ BRUTAL LOGGER for debugging 401 on Client Rules
+  const targetPath = (headers['x-forwarded-uri'] || headers['x-original-uri'] || "unknown").toLowerCase();
+  const isRulesPath = targetPath.includes("client-rules");
+  
+  if (isRulesPath) {
+    const allHeaders = JSON.stringify(headers, null, 2);
+    console.warn(`[BRUTAL-LOGGER] Admin request detected. Path: ${targetPath}\nHeaders: ${allHeaders}`);
+  }
+
   // Debug logging for production: list all incoming header keys to check for stripping/renaming
   const headerKeys = Object.keys(headers).join(", ");
   const authHeader = headers.authorization || (headers as any).Authorization;
