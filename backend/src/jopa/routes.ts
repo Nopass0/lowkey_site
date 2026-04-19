@@ -33,6 +33,42 @@ function generateJopaToken(userId: string, expiresInSeconds: number): string {
   return `${payload}.${sig}`;
 }
 
+async function fetchLegacyJopaSubTokenByLogin(login: string): Promise<string | null> {
+  try {
+    const base = (config.JOPA_API_URL || "http://89.169.54.87:9109").replace(/\/+$/, "");
+    const url = `${base}/api/v1/admin/subscriptions/by-login?login=${encodeURIComponent(login)}`;
+    const resp = await fetch(url, {
+      headers: { "X-Admin-Key": config.JOPA_ADMIN_KEY },
+    });
+    if (!resp.ok) return null;
+
+    const data = (await resp.json()) as any;
+    const subs = Array.isArray(data?.subscriptions) ? data.subscriptions : [];
+    if (subs.length === 0) return null;
+
+    const now = Date.now();
+    const active = subs
+      .filter((s: any) => {
+        if (s?.is_lifetime === true) return true;
+        const exp = Date.parse(String(s?.expires_at ?? ""));
+        return Number.isFinite(exp) && exp > now;
+      })
+      .sort((a: any, b: any) => {
+        const aExp = Date.parse(String(a?.expires_at ?? "")) || 0;
+        const bExp = Date.parse(String(b?.expires_at ?? "")) || 0;
+        return bExp - aExp;
+      });
+
+    const picked =
+      active.find((s: any) => typeof s?.token === "string" && s.token.startsWith("sub_")) ??
+      active.find((s: any) => typeof s?.token === "string" && s.token.length > 0);
+
+    return picked?.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const jopaRoutes = new Elysia({ prefix: "/user/jopa-token" })
   .use(authMiddleware)
   .get("/", async ({ user, set }) => {
@@ -58,6 +94,21 @@ export const jopaRoutes = new Elysia({ prefix: "/user/jopa-token" })
     if (!subscription) {
       set.status = 402;
       return { message: "No active subscription. Please renew to use VPN." };
+    }
+
+    // Prefer relay-native legacy token format expected by deployed JOPA relay.
+    try {
+      const userRow: any = await db.user.findUnique({
+        where: { id: user.userId },
+        select: { login: true, email: true },
+      });
+      const login = String(userRow?.login || userRow?.email || "").trim();
+      if (login) {
+        const legacyToken = await fetchLegacyJopaSubTokenByLogin(login);
+        if (legacyToken) return { sub_token: legacyToken };
+      }
+    } catch (err) {
+      console.warn("[JOPA] legacy token fetch failed:", err);
     }
 
     // ── 2. Calculate token TTL based on subscription expiry ─────────────────
