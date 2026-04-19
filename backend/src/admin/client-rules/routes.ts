@@ -154,6 +154,7 @@ export const adminClientRulesRoutes = new Elysia()
   // изменения немедленно без ожидания следующего тика.
   .post("/admin/client-rules/jopa-refresh", async ({ set }) => {
     try {
+      console.log(`[JOPA-REFRESH] Calling ${config.JOPA_API_URL}/api/v1/admin/rules/refresh with key prefix: ${config.JOPA_ADMIN_KEY.substring(0, 4)}...`);
       const resp = await fetch(`${config.JOPA_API_URL}/api/v1/admin/rules/refresh`, {
         method: "POST",
         headers: {
