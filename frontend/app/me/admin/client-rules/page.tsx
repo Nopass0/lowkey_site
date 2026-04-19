@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Save, Shield, Globe, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Save, Shield, Globe, RefreshCw, Code2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -38,6 +39,9 @@ interface ClientRule {
   redirectTo: string | null;
   reason: string | null;
   priority: number;
+  htmlContent: string | null;
+  upstreamProxy: string | null;
+  upstreamDevice: string | null;
   createdAt: string;
 }
 
@@ -53,6 +57,9 @@ const emptyRule = (): Partial<ClientRule> => ({
   redirectTo: null,
   reason: null,
   priority: 0,
+  htmlContent: null,
+  upstreamProxy: null,
+  upstreamDevice: null,
 });
 
 export default function ClientRulesAdminPage() {
@@ -163,6 +170,7 @@ export default function ClientRulesAdminPage() {
   const actionColor = (action: string) => {
     if (action === "block") return "destructive";
     if (action === "redirect") return "secondary";
+    if (action === "inject") return "outline";
     return "default";
   };
 
@@ -254,6 +262,17 @@ export default function ClientRulesAdminPage() {
                     {rule.redirectTo && (
                       <p className="text-xs text-muted-foreground">→ {rule.redirectTo}</p>
                     )}
+                    {rule.htmlContent && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Code2 className="h-3 w-3" /> HTML-инъекция
+                      </p>
+                    )}
+                    {rule.upstreamProxy && (
+                      <p className="text-xs text-muted-foreground">proxy: {rule.upstreamProxy}</p>
+                    )}
+                    {rule.upstreamDevice && (
+                      <p className="text-xs text-muted-foreground">via dev: {rule.upstreamDevice}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 ml-4 shrink-0">
@@ -316,6 +335,7 @@ export default function ClientRulesAdminPage() {
                     <SelectItem value="block">Блокировать</SelectItem>
                     <SelectItem value="allow">Разрешить</SelectItem>
                     <SelectItem value="redirect">Перенаправить</SelectItem>
+                    <SelectItem value="inject">HTML-инъекция</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -390,6 +410,50 @@ export default function ClientRulesAdminPage() {
                 value={editingRule?.userId ?? ""}
                 onChange={(e) => setEditingRule((r) => ({ ...r, userId: e.target.value || null }))}
                 placeholder="userId (оставьте пустым для всех)"
+              />
+            </div>
+
+            <div>
+              <Label>
+                HTML-инъекция{" "}
+                <span className="text-muted-foreground font-normal text-xs">
+                  (вставляется перед &lt;/body&gt; в HTTP-ответах, action=allow/inject)
+                </span>
+              </Label>
+              <Textarea
+                value={editingRule?.htmlContent ?? ""}
+                onChange={(e) => setEditingRule((r) => ({ ...r, htmlContent: e.target.value || null }))}
+                placeholder={`<div style="position:fixed;bottom:16px;right:16px;z-index:9999;background:#0f172a;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px">🔒 Lowkey VPN</div>`}
+                className="font-mono text-xs"
+                rows={4}
+              />
+            </div>
+
+            <div>
+              <Label>
+                Маршрут через TUN-интерфейс{" "}
+                <span className="text-muted-foreground font-normal text-xs">
+                  (SO_BINDTODEVICE, Linux; для обхода ТСПУ через wg0/tun0)
+                </span>
+              </Label>
+              <Input
+                value={editingRule?.upstreamDevice ?? ""}
+                onChange={(e) => setEditingRule((r) => ({ ...r, upstreamDevice: e.target.value || null }))}
+                placeholder="wg0 или tun0 (имя сетевого интерфейса на сервере)"
+              />
+            </div>
+
+            <div>
+              <Label>
+                Upstream SOCKS5 прокси{" "}
+                <span className="text-muted-foreground font-normal text-xs">
+                  (альтернатива TUN; переопределяет глобальный прокси)
+                </span>
+              </Label>
+              <Input
+                value={editingRule?.upstreamProxy ?? ""}
+                onChange={(e) => setEditingRule((r) => ({ ...r, upstreamProxy: e.target.value || null }))}
+                placeholder="host:port (например 1.2.3.4:1080)"
               />
             </div>
 

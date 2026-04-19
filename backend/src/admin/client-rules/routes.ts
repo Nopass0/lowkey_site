@@ -61,6 +61,9 @@ export const adminClientRulesRoutes = new Elysia()
             redirectTo: body.redirectTo ?? null,
             reason: body.reason ?? null,
             priority: body.priority ?? 0,
+            htmlContent: body.htmlContent ?? null,
+            upstreamProxy: body.upstreamProxy ?? null,
+            upstreamDevice: body.upstreamDevice ?? null,
             createdById: user.userId,
           },
         });
@@ -83,6 +86,9 @@ export const adminClientRulesRoutes = new Elysia()
         redirectTo: t.Optional(t.Nullable(t.String())),
         reason: t.Optional(t.Nullable(t.String())),
         priority: t.Optional(t.Number()),
+        htmlContent: t.Optional(t.Nullable(t.String())),
+        upstreamProxy: t.Optional(t.Nullable(t.String())),
+        upstreamDevice: t.Optional(t.Nullable(t.String())),
       }),
     },
   )
@@ -106,6 +112,9 @@ export const adminClientRulesRoutes = new Elysia()
             ...(body.redirectTo !== undefined && { redirectTo: body.redirectTo }),
             ...(body.reason !== undefined && { reason: body.reason }),
             ...(body.priority !== undefined && { priority: body.priority }),
+            ...(body.htmlContent !== undefined && { htmlContent: body.htmlContent }),
+            ...(body.upstreamProxy !== undefined && { upstreamProxy: body.upstreamProxy }),
+            ...(body.upstreamDevice !== undefined && { upstreamDevice: body.upstreamDevice }),
           },
         });
         return { rule };
@@ -128,6 +137,9 @@ export const adminClientRulesRoutes = new Elysia()
         redirectTo: t.Optional(t.Nullable(t.String())),
         reason: t.Optional(t.Nullable(t.String())),
         priority: t.Optional(t.Number()),
+        htmlContent: t.Optional(t.Nullable(t.String())),
+        upstreamProxy: t.Optional(t.Nullable(t.String())),
+        upstreamDevice: t.Optional(t.Nullable(t.String())),
       }),
     },
   )

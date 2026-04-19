@@ -671,6 +671,7 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
     fields: [
       "id", "name", "enabled", "userId", "domain", "ipCidr", "port",
       "protocol", "action", "redirectTo", "reason", "priority",
+      "htmlContent", "upstreamProxy", "upstreamDevice",
       "createdAt", "updatedAt", "createdById",
     ],
     dateFields: ["createdAt", "updatedAt"],
