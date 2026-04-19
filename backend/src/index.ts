@@ -79,7 +79,7 @@ function startServerMonitor(): void {
   }, INTERVAL_MS);
 
   console.log(
-    "[Monitor] VPN server heartbeat monitor started (2-min interval).",
+    "[Monitor] VPN server heartbeat monitor started (1-min interval).",
   );
 }
 
@@ -184,6 +184,12 @@ function startVpnSessionCleanupWorker(): void {
 
   console.log("[VpnCleanup] Started.");
 }
+
+const maxRequestBodySize = (() => {
+  const mb = Number(process.env.MAX_REQUEST_BODY_MB ?? "2048");
+  if (!Number.isFinite(mb) || mb <= 0) return 2 * 1024 * 1024 * 1024;
+  return Math.floor(mb * 1024 * 1024);
+})();
 
 /**
  * Main Elysia application instance.
@@ -306,10 +312,14 @@ const app = new Elysia()
   .listen({
     port: config.PORT,
     hostname: "0.0.0.0",
+    maxRequestBodySize,
   });
 
 console.log(`🚀 lowkey VPN API running at http://localhost:${config.PORT}`);
 console.log(`📚 Swagger docs at http://localhost:${config.PORT}/swagger`);
+console.log(
+  `[API] maxRequestBodySize=${Math.floor(maxRequestBodySize / (1024 * 1024))}MB`,
+);
 
 // Start background VPN-server offline detector
 startServerMonitor();

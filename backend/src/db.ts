@@ -408,7 +408,7 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
   },
   appRelease: {
     collection: "app_releases",
-    fields: ["id", "platform", "version", "changelog", "downloadUrl", "fileSizeMb", "downloadCount", "isLatest", "createdAt"],
+    fields: ["id", "platform", "version", "changelog", "downloadUrl", "fileSizeMb", "sha256", "downloadCount", "isLatest", "createdAt"],
     dateFields: ["createdAt"],
   },
   supportTicket: {
