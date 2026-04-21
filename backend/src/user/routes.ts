@@ -105,12 +105,32 @@ function hasProtocol(server: {
   supportedProtocols?: unknown;
   serverType?: string | null;
 }, protocol: string): boolean {
+  const extractProtocols = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).toLowerCase());
+    }
+    if (typeof value === "string" && value.trim()) {
+      const raw = value.trim();
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item).toLowerCase());
+        }
+      } catch {
+        // ignore JSON parse error and try comma-separated fallback below.
+      }
+      return raw
+        .split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
   const normalized = protocol.toLowerCase();
-  const listed =
-    Array.isArray(server.supportedProtocols) &&
-    server.supportedProtocols.some(
-      (value) => String(value).toLowerCase() === normalized,
-    );
+  const listed = extractProtocols(server.supportedProtocols).includes(
+    normalized,
+  );
   if (listed) {
     return true;
   }
@@ -275,7 +295,13 @@ export const userRoutes = new Elysia({ prefix: "/user" })
             ])
           : [[], null, null];
 
+      const vlessPreferredServer =
+        vpnServers.find((server) => hasProtocol(server as any, "vless")) ??
+        vpnServers.find((server) => hasProtocol(server as any, "hysteria2")) ??
+        null;
+
       const vpnServer =
+        vlessPreferredServer ??
         vpnServers.find((server) => Boolean(resolveVlessTemplate(server as any))) ??
         vpnServers[0] ??
         null;
@@ -321,13 +347,25 @@ export const userRoutes = new Elysia({ prefix: "/user" })
       const resolvedVlessTemplate = selectedServer
         ? resolveVlessTemplate(selectedServer as any)
         : null;
-      const baseProtocols = Array.isArray(
-        (selectedServer as any)?.supportedProtocols,
-      )
-        ? (selectedServer as any).supportedProtocols.map((item: unknown) =>
-            String(item),
-          )
-        : [];
+      const baseProtocolsRaw = (selectedServer as any)?.supportedProtocols;
+      const baseProtocols = Array.isArray(baseProtocolsRaw)
+        ? baseProtocolsRaw.map((item: unknown) => String(item))
+        : typeof baseProtocolsRaw === "string" && baseProtocolsRaw.trim()
+          ? (() => {
+              try {
+                const parsed = JSON.parse(baseProtocolsRaw);
+                if (Array.isArray(parsed)) {
+                  return parsed.map((item) => String(item));
+                }
+              } catch {
+                // ignore JSON parse error and use comma fallback.
+              }
+              return baseProtocolsRaw
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+            })()
+          : [];
 
       /**
        * Fallback MTProto settings from env when the `mtproto_settings` doc is
