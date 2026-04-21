@@ -142,7 +142,7 @@ function buildDefaultVlessTemplate(
   serverHost?: string | null,
 ) {
   const host = serverIp.trim();
-  const sniHost = (serverHost ?? serverIp).trim();
+  const sniHost = serverIp.trim();
   const portRaw = Number.parseInt(process.env.VPN_DEFAULT_VLESS_PORT ?? "", 10);
   const port = Number.isFinite(portRaw) && portRaw > 0 ? portRaw : 2443;
   return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&fp=chrome&type=tcp#LOWKEY`;
@@ -208,7 +208,7 @@ function buildMtprotoProxyLinks(
     return null;
   }
 
-  const host = (serverHost || serverIp).trim();
+  const host = serverIp.trim();
   if (!host) {
     return null;
   }
