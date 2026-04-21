@@ -149,7 +149,14 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
       }
 
       try {
-        const { ip, hostname, port, supportedProtocols, serverType } = body;
+        const {
+          ip,
+          hostname,
+          port,
+          supportedProtocols,
+          serverType,
+          connectLinkTemplate,
+        } = body;
         const existing = await db.vpnServer.findFirst({
           where: { ip, port },
         });
@@ -161,6 +168,9 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
               hostname: hostname ?? existing.hostname ?? null,
               supportedProtocols,
               serverType,
+              ...(connectLinkTemplate !== undefined
+                ? { connectLinkTemplate: connectLinkTemplate || null }
+                : {}),
               status: "online",
               lastSeenAt: new Date(),
               ...(existing.deployStatus === "not_deployed" ? { deployStatus: "deployed" } : {}),
@@ -176,6 +186,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
             port,
             supportedProtocols,
             serverType,
+            connectLinkTemplate: connectLinkTemplate || null,
             status: "online",
             currentLoad: 0,
           },
@@ -195,6 +206,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
         port: t.Number(),
         supportedProtocols: t.Array(t.String()),
         serverType: t.String(),
+        connectLinkTemplate: t.Optional(t.Nullable(t.String())),
       }),
     },
   )
@@ -584,15 +596,34 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
           },
         });
 
-        if (!vpnToken) {
+        // UUID fallback: VLESS clients present the user's account UUID as
+        // the "token" because the VLESS wire format reserves exactly 16 bytes
+        // for auth. When we can't find a per-device VPN token, treat the
+        // input as a user id and gate purely on subscription state.
+        const uuidRegex =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+        let user: any = vpnToken?.user ?? null;
+        let deviceIdForSession: string | null = vpnToken?.deviceId ?? null;
+
+        if (!vpnToken && uuidRegex.test(token)) {
+          user = await db.user.findUnique({
+            where: { id: token },
+            include: { subscription: true },
+          });
+          if (user) {
+            deviceIdForSession = null;
+          }
+        }
+
+        if (!vpnToken && !user) {
           return { valid: false, reason: "Token not found" };
         }
 
-        if (vpnToken.expiresAt < new Date()) {
+        if (vpnToken && vpnToken.expiresAt < new Date()) {
           return { valid: false, reason: "Token expired" };
         }
 
-        const user = vpnToken.user;
         if (!user) {
           return { valid: false, reason: "User not found" };
         }

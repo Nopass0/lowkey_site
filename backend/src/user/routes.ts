@@ -101,6 +101,79 @@ function buildVlessLink(
   return link;
 }
 
+function hasProtocol(server: {
+  supportedProtocols?: unknown;
+  serverType?: string | null;
+}, protocol: string): boolean {
+  const normalized = protocol.toLowerCase();
+  const listed =
+    Array.isArray(server.supportedProtocols) &&
+    server.supportedProtocols.some(
+      (value) => String(value).toLowerCase() === normalized,
+    );
+  if (listed) {
+    return true;
+  }
+  return (server.serverType ?? "").toLowerCase() === normalized;
+}
+
+function buildDefaultVlessTemplate(
+  serverIp: string,
+  serverHost?: string | null,
+) {
+  const host = serverIp.trim();
+  const sniHost = (serverHost ?? serverIp).trim();
+  const portRaw = Number.parseInt(process.env.VPN_DEFAULT_VLESS_PORT ?? "", 10);
+  const port = Number.isFinite(portRaw) && portRaw > 0 ? portRaw : 2443;
+  return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&fp=chrome&type=tcp#LOWKEY`;
+}
+
+/**
+ * Resolves the VLESS connect-link template for a given VPN server row.
+ *
+ * Priority:
+ *   1. If the server heartbeat wrote an explicit `connectLinkTemplate`
+ *      (happens when the current `hysteria_server` binary is running), use it.
+ *      This template already contains the right port / reality / sni / pbk.
+ *   2. Otherwise — fall back to a default `vless://` template for `serverIp:2443`
+ *      (security=tls, sni=<host>, type=tcp) so that a link is ALWAYS produced
+ *      whenever a server is registered as `online`.
+ *
+ * The only case we return `null` is when the server row is **explicitly**
+ * marked as a non-VPN role (e.g. serverType === "mtproto_only" or
+ * "relay_only"). Everything else → the user sees a link.
+ *
+ * Rationale:
+ *   Previously this function required `supportedProtocols` to include
+ *   "vless" | "hysteria2". Older hysteria binaries in production did not
+ *   populate `supportedProtocols`, so the filter below dropped every server
+ *   and the user's profile received `vpnAccess = null`. Users reported
+ *   "ссылка на VLESS не показывается" because of this. The permissive
+ *   fallback is safe — even if VLESS TLS inbound is down on :2443, the worst
+ *   case is a non-working link, not a missing UI element.
+ */
+function resolveVlessTemplate(server: {
+  ip: string;
+  hostname?: string | null;
+  serverType?: string | null;
+  connectLinkTemplate?: string | null;
+  supportedProtocols?: unknown;
+}) {
+  if (server.connectLinkTemplate?.trim()) {
+    return server.connectLinkTemplate;
+  }
+  const role = (server.serverType ?? "").toLowerCase();
+  // Only skip servers that are explicitly NOT meant for VLESS.
+  const nonVlessRoles = new Set(["mtproto_only", "relay_only", "dns_only"]);
+  if (nonVlessRoles.has(role)) {
+    return null;
+  }
+  if (!server.ip) {
+    return null;
+  }
+  return buildDefaultVlessTemplate(server.ip, server.hostname ?? null);
+}
+
 function planHasTelegramProxy(plan: TelegramProxyPlan): boolean {
   return Boolean(plan?.isTelegramPlan || plan?.telegramProxyEnabled);
 }
@@ -187,26 +260,101 @@ export const userRoutes = new Elysia({ prefix: "/user" })
         (dbUser.subscription.isLifetime ||
           dbUser.subscription.activeUntil > new Date());
 
-      const [vpnServer, currentPlan, mtprotoSettings] =
+      const [vpnServers, currentPlan, mtprotoSettings] =
         isSubscriptionActive && dbUser.subscription
           ? await Promise.all([
-              db.vpnServer.findFirst({
+              db.vpnServer.findMany({
                 where: { status: "online" },
                 orderBy: [{ lastSeenAt: "desc" }, { currentLoad: "asc" }],
+                take: 20,
               }),
               db.subscriptionPlan.findFirst({
                 where: { slug: dbUser.subscription.planId },
               }),
               db.mtprotoSettings.findFirst({}),
             ])
-          : [null, null, null];
+          : [[], null, null];
+
+      const vpnServer =
+        vpnServers.find((server) => Boolean(resolveVlessTemplate(server as any))) ??
+        vpnServers[0] ??
+        null;
+      const fallbackServer =
+        !vpnServer && isSubscriptionActive
+          ? await db.vpnServer.findFirst({
+              orderBy: [{ lastSeenAt: "desc" }],
+            })
+          : null;
+
+      /**
+       * Synthetic "last-resort" server used when the `vpn_servers` collection is
+       * completely empty (can happen right after a DB wipe, or when the VPN node
+       * cannot authenticate into the backend to call `/servers/register`).
+       *
+       * Without this, an active subscriber sees no `vlessLink` in the UI even
+       * though the physical VPN node is up. We default to the production
+       * `s1.lowkey.su` node with VLESS TLS on :2443 and MTProto on :2444 —
+       * overridable via env for staging:
+       *   VPN_FALLBACK_HOST       (default: s1.lowkey.su)
+       *   VPN_FALLBACK_IP         (default: 89.169.54.87)
+       *   VPN_FALLBACK_LOCATION   (default: "Russia · Moscow")
+       */
+      const syntheticServer =
+        !vpnServer && !fallbackServer && isSubscriptionActive
+          ? {
+              id: "synthetic-s1",
+              ip: process.env.VPN_FALLBACK_IP ?? "89.169.54.87",
+              hostname: process.env.VPN_FALLBACK_HOST ?? "s1.lowkey.su",
+              location:
+                process.env.VPN_FALLBACK_LOCATION ?? "Russia · Moscow",
+              status: "online" as const,
+              serverType: "hybrid",
+              supportedProtocols: ["vless", "hysteria2", "mtproto"],
+              connectLinkTemplate: null,
+              currentLoad: 0,
+              lastSeenAt: new Date(),
+            }
+          : null;
+
+      const selectedServer = vpnServer ?? fallbackServer ?? syntheticServer;
+
+      const resolvedVlessTemplate = selectedServer
+        ? resolveVlessTemplate(selectedServer as any)
+        : null;
+      const baseProtocols = Array.isArray(
+        (selectedServer as any)?.supportedProtocols,
+      )
+        ? (selectedServer as any).supportedProtocols.map((item: unknown) =>
+            String(item),
+          )
+        : [];
+
+      /**
+       * Fallback MTProto settings from env when the `mtproto_settings` doc is
+       * absent in VoidDB (happens on fresh deployments). The production node
+       * always has MTProto listening on :2444.
+       *   MTPROTO_FALLBACK_PORT    (default: 2444)
+       *   MTPROTO_FALLBACK_SECRET  (default: none — link suppressed if unset)
+       */
+      const effectiveMtproto =
+        mtprotoSettings ??
+        (process.env.MTPROTO_FALLBACK_SECRET
+          ? {
+              enabled: true,
+              port: Number.parseInt(
+                process.env.MTPROTO_FALLBACK_PORT ?? "2444",
+                10,
+              ),
+              secret: process.env.MTPROTO_FALLBACK_SECRET,
+            }
+          : null);
 
       const mtprotoAccess =
-        vpnServer && planHasTelegramProxy(currentPlan)
+        selectedServer && planHasTelegramProxy(currentPlan)
           ? buildMtprotoProxyLinks(
-              mtprotoSettings,
-              vpnServer.ip,
-              vpnServer.hostname ?? null,
+              effectiveMtproto,
+              selectedServer.ip,
+              selectedServer.hostname ?? null,
             )
           : null;
 
@@ -251,38 +399,38 @@ export const userRoutes = new Elysia({ prefix: "/user" })
         telegramLinkCode: !dbUser.telegramId ? linkCode : null,
         referralRate: dbUser.referralRate,
         sbpProvider: ykSettings.sbpProvider,
-        vpnAccess: vpnServer
+        vpnAccess: selectedServer
           ? {
-              serverIp: vpnServer.ip,
-              serverHost: vpnServer.hostname ?? null,
-              location: vpnServer.location,
+              serverIp: selectedServer.ip,
+              serverHost: selectedServer.hostname ?? null,
+              location: selectedServer.location,
               protocols: mtprotoAccess
                 ? Array.from(
                     new Set([
-                      ...vpnServer.supportedProtocols,
+                      ...baseProtocols,
                       "mtproto",
                     ]),
                   )
-                : vpnServer.supportedProtocols,
+                : baseProtocols,
               vlessLink: buildVlessLink(
-                vpnServer.connectLinkTemplate,
+                resolvedVlessTemplate,
                 dbUser.id,
-                vpnServer.ip,
-                vpnServer.hostname ?? null,
+                selectedServer.ip,
+                selectedServer.hostname ?? null,
                 clientPlatform === "android" ? "android" : null,
               ),
               androidVlessLink: buildVlessLink(
-                vpnServer.connectLinkTemplate,
+                resolvedVlessTemplate,
                 dbUser.id,
-                vpnServer.ip,
-                vpnServer.hostname ?? null,
+                selectedServer.ip,
+                selectedServer.hostname ?? null,
                 "android",
               ),
               androidCompatVlessLink: buildVlessLink(
-                vpnServer.connectLinkTemplate,
+                resolvedVlessTemplate,
                 dbUser.id,
-                vpnServer.ip,
-                vpnServer.hostname ?? null,
+                selectedServer.ip,
+                selectedServer.hostname ?? null,
                 "android",
                 true,
               ),
