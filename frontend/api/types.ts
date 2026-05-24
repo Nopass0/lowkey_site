@@ -184,6 +184,7 @@ export interface SubscriptionPlan {
   maxConcurrentConnections?: number;
   speedLimitUpMbps?: number | null;
   speedLimitDownMbps?: number | null;
+  allowedProtocols?: string[];
   isPopular?: boolean;
   isTelegramPlan?: boolean;
   telegramProxyEnabled?: boolean;

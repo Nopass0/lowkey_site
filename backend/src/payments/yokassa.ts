@@ -118,7 +118,12 @@ export async function getYKSettings() {
   return db.yokassaSettings.upsert({
     where: { id: "global" },
     update: {},
-    create: { id: "global", mode: "test", testSubscriptionEnabled: false },
+    create: {
+      id: "global",
+      mode: "test",
+      testSubscriptionEnabled: false,
+      sbpProvider: "tochka",
+    },
   });
 }
 

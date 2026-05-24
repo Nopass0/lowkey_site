@@ -270,6 +270,7 @@ const MODEL_CONFIG: Record<ModelName, ModelConfig> = {
       "isActive",
       "isTelegramPlan",
       "telegramProxyEnabled",
+      "allowedProtocols",
       "sortOrder",
       "promoActive",
       "promoPrice",
