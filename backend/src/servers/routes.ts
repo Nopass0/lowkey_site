@@ -15,6 +15,20 @@ import {
   resolveVpnPolicyForUser,
 } from "../vpn/policy";
 
+function toMtprotoClientSecret(value?: string | null) {
+  const secret = value?.trim().toLowerCase();
+  if (!secret) {
+    return null;
+  }
+  if (/^(dd|ee)[0-9a-f]{32}$/.test(secret)) {
+    return secret;
+  }
+  if (/^[0-9a-f]{32}$/.test(secret)) {
+    return `dd${secret}`;
+  }
+  return null;
+}
+
 function requireServerSecret(
   headers: Record<string, string | undefined>,
   set: { status?: number | string },
@@ -141,6 +155,46 @@ function verifyHostnameAgainstCert(certPem: string, hostname: string) {
 }
 
 export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
+  .get("/public/mtproto", async ({ set }) => {
+    try {
+      const settings = await db.mtprotoSettings.findFirst({});
+      const secret = toMtprotoClientSecret(settings?.secret);
+      const enabled = Boolean(settings?.enabled && secret);
+      const port =
+        typeof settings?.port === "number" && Number.isFinite(settings.port)
+          ? Math.max(1, Math.trunc(settings.port))
+          : 443;
+
+      const server = await db.vpnServer.findFirst({
+        where: { status: "online" },
+        orderBy: { currentLoad: "asc" },
+      });
+      const host = String(server?.ip || "46.226.166.226").trim();
+      const params =
+        enabled && secret
+          ? new URLSearchParams({
+              server: host,
+              port: String(port),
+              secret,
+            })
+          : null;
+
+      return {
+        enabled,
+        host,
+        port,
+        protocol: "MTProto",
+        tgLink: params ? `tg://proxy?${params.toString()}` : null,
+        shareLink: params ? `https://t.me/proxy?${params.toString()}` : null,
+        botUsername: settings?.botUsername ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error("[PublicMtproto] error:", error);
+      set.status = 500;
+      return { message: "Internal server error" };
+    }
+  })
   .post(
     "/register",
     async ({ body, headers, set }) => {

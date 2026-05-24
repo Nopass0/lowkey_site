@@ -639,7 +639,7 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
         return {
           id: "global",
           enabled: false,
-          port: 8443,
+          port: 443,
           secret: null,
           adTag: null,
           channelUsername: null,
@@ -680,15 +680,23 @@ export const adminServerRoutes = new Elysia({ prefix: "/admin/server" })
         }
 
         if (existing) {
-          return await db.mtprotoSettings.update({
-            where: { id: "global" },
+          const updated = await db.mtprotoSettings.update({
+            where: { id: existing.id },
             data: normalizedPayload,
           });
+          return {
+            ...updated,
+            secret: serializeMtprotoSecret(updated.secret),
+          };
         }
 
-        return await db.mtprotoSettings.create({
+        const created = await db.mtprotoSettings.create({
           data: { id: "global", ...normalizedPayload },
         });
+        return {
+          ...created,
+          secret: serializeMtprotoSecret(created.secret),
+        };
       } catch (error) {
         console.error("[AdminServerMtprotoPatch] error:", error);
         set.status =

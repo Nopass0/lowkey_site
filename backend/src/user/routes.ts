@@ -149,7 +149,7 @@ function buildDefaultVlessTemplate(
   const sniHost = (serverHost?.trim() || serverIp.trim());
   const portRaw = Number.parseInt(process.env.VPN_DEFAULT_VLESS_PORT ?? "", 10);
   const port = Number.isFinite(portRaw) && portRaw > 0 ? portRaw : 2443;
-  return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&alpn=h2,http/1.1&fp=chrome&type=tcp#LOWKEY`;
+  return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&fp=chrome&type=tcp#LOWKEY`;
 }
 
 /**
