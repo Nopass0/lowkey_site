@@ -402,6 +402,7 @@ jobs:
           LETSENCRYPT_EMAIL: ${{ env.LETSENCRYPT_EMAIL }}
           BACKEND_BIND_PORT: '3302'
           FRONTEND_BIND_PORT: '3303'
+          NGINX_HTTPS_LISTEN: 127.0.0.1:8444
           NEXT_PUBLIC_SITE_URL: https://english.lowkey.su
           NEXT_PUBLIC_API_URL: /api
           BACKEND_INTERNAL_URL: http://backend:3002
@@ -464,6 +465,7 @@ jobs:
              LETSENCRYPT_EMAIL='${LETSENCRYPT_EMAIL}' \
              BACKEND_BIND_PORT='${BACKEND_BIND_PORT}' \
              FRONTEND_BIND_PORT='${FRONTEND_BIND_PORT}' \
+             NGINX_HTTPS_LISTEN='${NGINX_HTTPS_LISTEN}' \
              NEXT_PUBLIC_SITE_URL='${NEXT_PUBLIC_SITE_URL}' \
              NEXT_PUBLIC_API_URL='${NEXT_PUBLIC_API_URL}' \
              BACKEND_INTERNAL_URL='${BACKEND_INTERNAL_URL}' \
