@@ -99,6 +99,10 @@ function buildVlessLink(
         .replace(/[?&]$/, "")
         .replace("?&", "?");
     }
+    normalized = normalized
+      .replace(/([?&])alpn=[^&#]*&?/, "$1")
+      .replace(/[?&]$/, "")
+      .replace("?&", "?");
     link = `${normalized}${tag ? `#${tag}` : ""}`;
   }
 

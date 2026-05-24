@@ -118,6 +118,10 @@ function normalizeConnectLinkTemplate(value?: string | null) {
       const separator = normalized.includes("?") ? "&" : "?";
       normalized = `${normalized}${separator}type=tcp`;
     }
+    normalized = normalized
+      .replace(/([?&])alpn=[^&#]*&?/, "$1")
+      .replace(/[?&]$/, "")
+      .replace("?&", "?");
     if (
       normalized.includes("security=reality") &&
       !normalized.includes("flow=")
