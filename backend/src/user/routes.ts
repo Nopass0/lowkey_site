@@ -24,7 +24,10 @@ function toMtprotoClientSecret(value?: string | null) {
   if (!secret) {
     return null;
   }
-  if (/^(dd|ee)[0-9a-f]{32}$/.test(secret)) {
+  if (/^dd[0-9a-f]{32}$/.test(secret)) {
+    return secret;
+  }
+  if (/^ee[0-9a-f]{32,}$/.test(secret)) {
     return secret;
   }
   if (/^[0-9a-f]{32}$/.test(secret)) {

@@ -70,13 +70,13 @@ function normalizeMtprotoSecret(value?: string | null) {
   }
 
   const secret = normalized.toLowerCase();
-  if (!/^(?:[0-9a-f]{32}|(?:dd|ee)[0-9a-f]{32})$/.test(secret)) {
+  if (!/^(?:[0-9a-f]{32}|dd[0-9a-f]{32}|ee[0-9a-f]{32,})$/.test(secret)) {
     throw new Error(
-      "MTProto secret must contain 32 hex characters; dd/ee prefix is optional",
+      "MTProto secret must contain 32 hex characters; dd prefix or ee TLS secret is optional",
     );
   }
 
-  return /^(dd|ee)/.test(secret) ? secret.slice(2) : secret;
+  return /^dd[0-9a-f]{32}$/.test(secret) ? secret.slice(2) : secret;
 }
 
 function generateMtprotoSecret() {
@@ -88,7 +88,7 @@ function serializeMtprotoSecret(value?: string | null) {
   if (!secret) {
     return null;
   }
-  return /^(dd|ee)[0-9a-f]{32}$/.test(secret) ? secret.slice(2) : secret;
+  return /^dd[0-9a-f]{32}$/.test(secret) ? secret.slice(2) : secret;
 }
 
 function toPublishedMtprotoSecret(value?: string | null) {
@@ -96,7 +96,7 @@ function toPublishedMtprotoSecret(value?: string | null) {
   if (!secret) {
     return null;
   }
-  if (/^(dd|ee)[0-9a-f]{32}$/.test(secret)) {
+  if (/^dd[0-9a-f]{32}$/.test(secret) || /^ee[0-9a-f]{32,}$/.test(secret)) {
     return secret;
   }
   if (/^[0-9a-f]{32}$/.test(secret)) {

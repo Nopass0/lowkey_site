@@ -21,9 +21,9 @@ const fallbackProxy: Required<Pick<PublicMtproto, "host" | "port">> & {
   host: "46.226.166.226",
   port: 443,
   tgLink:
-    "tg://proxy?server=46.226.166.226&port=443&secret=dd4913013f5bb12af4d7395000621b4b9c",
+    "tg://proxy?server=46.226.166.226&port=443&secret=ee7f431728f0a4a65260b1b03efdefd4f66c6f776b65792e7375",
   shareLink:
-    "https://t.me/proxy?server=46.226.166.226&port=443&secret=dd4913013f5bb12af4d7395000621b4b9c",
+    "https://t.me/proxy?server=46.226.166.226&port=443&secret=ee7f431728f0a4a65260b1b03efdefd4f66c6f776b65792e7375",
 };
 
 const pageTitle = "MTProto прокси lowkey для Telegram";
