@@ -664,7 +664,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
         return {
           valid: true,
           userId: user.id,
-          deviceId: vpnToken.deviceId,
+          deviceId: deviceIdForSession,
           protocol: protocol ?? "hysteria2",
           subscriptionExpired,
           limits: policy.effective,

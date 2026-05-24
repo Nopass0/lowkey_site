@@ -69,8 +69,12 @@ function buildVlessLink(
       const separator = normalized.includes("?") ? "&" : "?";
       normalized = `${normalized}${separator}type=tcp`;
     }
+    // Historically we rewrote Android links to port :8444 assuming a separate
+    // inbound. In reality :8444 is served by `dotgw` (not VLESS), so Android
+    // clients (v2rayTun, Throne) silently failed their TLS handshake. VLESS
+    // listens on :2443 for every platform, so no port rewrite is needed.
     if (isAndroidClient) {
-      normalized = normalized.replace(/@([^:/?#]+)(:\d+)?/, "@$1:8444");
+      // intentionally no-op
     }
     if (
       !isAndroidClient &&
@@ -142,10 +146,10 @@ function buildDefaultVlessTemplate(
   serverHost?: string | null,
 ) {
   const host = serverIp.trim();
-  const sniHost = serverIp.trim();
+  const sniHost = (serverHost?.trim() || serverIp.trim());
   const portRaw = Number.parseInt(process.env.VPN_DEFAULT_VLESS_PORT ?? "", 10);
   const port = Number.isFinite(portRaw) && portRaw > 0 ? portRaw : 2443;
-  return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&fp=chrome&type=tcp#LOWKEY`;
+  return `vless://{uuid}@${host}:${port}?encryption=none&security=tls&sni=${sniHost}&alpn=h2,http/1.1&fp=chrome&type=tcp#LOWKEY`;
 }
 
 /**
@@ -155,13 +159,13 @@ function buildDefaultVlessTemplate(
  *   1. If the server heartbeat wrote an explicit `connectLinkTemplate`
  *      (happens when the current `hysteria_server` binary is running), use it.
  *      This template already contains the right port / reality / sni / pbk.
- *   2. Otherwise — fall back to a default `vless://` template for `serverIp:2443`
+ *   2. Otherwise, fall back to a default `vless://` template for `serverIp:2443`
  *      (security=tls, sni=<host>, type=tcp) so that a link is ALWAYS produced
  *      whenever a server is registered as `online`.
  *
  * The only case we return `null` is when the server row is **explicitly**
  * marked as a non-VPN role (e.g. serverType === "mtproto_only" or
- * "relay_only"). Everything else → the user sees a link.
+ * "relay_only"). Everything else returns a link to the user.
  *
  * Rationale:
  *   Previously this function required `supportedProtocols` to include
@@ -169,7 +173,7 @@ function buildDefaultVlessTemplate(
  *   populate `supportedProtocols`, so the filter below dropped every server
  *   and the user's profile received `vpnAccess = null`. Users reported
  *   "ссылка на VLESS не показывается" because of this. The permissive
- *   fallback is safe — even if VLESS TLS inbound is down on :2443, the worst
+ *   fallback is safe: even if VLESS TLS inbound is down on :2443, the worst
  *   case is a non-working link, not a missing UI element.
  */
 function resolveVlessTemplate(server: {
