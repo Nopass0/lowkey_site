@@ -115,10 +115,13 @@ const PERIOD_MS: Record<string, number> = {
 };
 
 export async function getYKSettings() {
-  return db.yokassaSettings.upsert({
-    where: { id: "global" },
-    update: {},
-    create: {
+  const existing = await db.yokassaSettings.findFirst({});
+  if (existing) {
+    return existing;
+  }
+
+  return db.yokassaSettings.create({
+    data: {
       id: "global",
       mode: "test",
       testSubscriptionEnabled: false,
