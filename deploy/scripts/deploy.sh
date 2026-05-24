@@ -21,6 +21,7 @@ BITNET_THREADS="${BITNET_THREADS:-4}"
 BITNET_CTX_SIZE="${BITNET_CTX_SIZE:-4096}"
 BITNET_TEMPERATURE="${BITNET_TEMPERATURE:-0.7}"
 BITNET_N_PREDICT="${BITNET_N_PREDICT:-1024}"
+NGINX_HTTPS_LISTEN="${NGINX_HTTPS_LISTEN:-443}"
 SERVER_NAMES="${DOMAIN}${AI_DOMAIN:+ ${AI_DOMAIN}}"
 
 require_backend_env() {
@@ -45,6 +46,7 @@ render_template() {
     -e "s/__SERVER_NAMES__/${SERVER_NAMES}/g" \
     -e "s/__BACKEND_PORT__/${BACKEND_BIND_PORT}/g" \
     -e "s/__FRONTEND_PORT__/${FRONTEND_BIND_PORT}/g" \
+    -e "s#__NGINX_HTTPS_LISTEN__#${NGINX_HTTPS_LISTEN}#g" \
     "${template_path}" > "${target_path}"
 }
 
@@ -90,8 +92,7 @@ append_n8n_https_config() {
   cat >> "${target_path}" <<EOF
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen ${NGINX_HTTPS_LISTEN} ssl http2;
     server_name ${N8N_DOMAIN};
 
     ssl_certificate /etc/letsencrypt/live/${N8N_DOMAIN}/fullchain.pem;

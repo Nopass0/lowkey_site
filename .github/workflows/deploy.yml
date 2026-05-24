@@ -52,6 +52,7 @@ jobs:
       BITNET_CTX_SIZE: '4096'
       BITNET_TEMPERATURE: '0.7'
       BITNET_N_PREDICT: '1024'
+      NGINX_HTTPS_LISTEN: ${{ github.ref_name == 'main' && '127.0.0.1:8444' || '443' }}
       GENERIC_TIMEZONE: Asia/Yekaterinburg
       YOKASSA_SHOP_ID: ${{ secrets.YOKASSA_SHOP_ID }}
       YOKASSA_SECRET: ${{ secrets.YOKASSA_SECRET }}
@@ -288,6 +289,7 @@ jobs:
           BITNET_CTX_SIZE: ${{ env.BITNET_CTX_SIZE }}
           BITNET_TEMPERATURE: ${{ env.BITNET_TEMPERATURE }}
           BITNET_N_PREDICT: ${{ env.BITNET_N_PREDICT }}
+          NGINX_HTTPS_LISTEN: ${{ env.NGINX_HTTPS_LISTEN }}
           GENERIC_TIMEZONE: ${{ env.GENERIC_TIMEZONE }}
           N8N_ENCRYPTION_KEY: ${{ env.N8N_ENCRYPTION_KEY }}
           N8N_BASIC_AUTH_ACTIVE: ${{ env.N8N_BASIC_AUTH_ACTIVE }}
@@ -371,6 +373,7 @@ jobs:
              BITNET_CTX_SIZE='${BITNET_CTX_SIZE}' \
              BITNET_TEMPERATURE='${BITNET_TEMPERATURE}' \
              BITNET_N_PREDICT='${BITNET_N_PREDICT}' \
+             NGINX_HTTPS_LISTEN='${NGINX_HTTPS_LISTEN}' \
              GENERIC_TIMEZONE='${GENERIC_TIMEZONE}' \
              N8N_ENCRYPTION_KEY='${N8N_ENCRYPTION_KEY}' \
              N8N_BASIC_AUTH_ACTIVE='${N8N_BASIC_AUTH_ACTIVE}' \
