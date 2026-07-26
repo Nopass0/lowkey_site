@@ -64,7 +64,7 @@ ensure_server_packages() {
 append_n8n_http_config() {
   local target_path="$1"
 
-  [[ -n "${N8N_DOMAIN}" ]] || return
+  [[ -n "${N8N_DOMAIN}" ]] || return 0
 
   cat >> "${target_path}" <<EOF
 
@@ -94,7 +94,7 @@ EOF
 append_n8n_https_config() {
   local target_path="$1"
 
-  [[ -n "${N8N_DOMAIN}" ]] || return
+  [[ -n "${N8N_DOMAIN}" ]] || return 0
 
   cat >> "${target_path}" <<EOF
 
@@ -136,7 +136,7 @@ EOF
 append_spider_config() {
   local target_path="$1"
 
-  [[ -n "${SPIDER_DOMAIN:-}" ]] || return
+  [[ -n "${SPIDER_DOMAIN:-}" ]] || return 0
 
   # HTTP block (ACME + redirect)
   cat >> "${target_path}" <<EOF
@@ -158,7 +158,7 @@ EOF
 
   # HTTPS block — only if a cert for spider exists.
   local spider_cert_dir="/etc/letsencrypt/live/${SPIDER_DOMAIN}"
-  [[ -f "${spider_cert_dir}/fullchain.pem" && -f "${spider_cert_dir}/privkey.pem" ]] || return
+  [[ -f "${spider_cert_dir}/fullchain.pem" && -f "${spider_cert_dir}/privkey.pem" ]] || return 0
 
   cat >> "${target_path}" <<EOF
 
