@@ -423,7 +423,15 @@ ensure_certificate() {
     )
 
     if [[ -n "${AI_DOMAIN}" ]]; then
-      certbot_args+=(-d "${AI_DOMAIN}")
+      # Only add AI_DOMAIN to the cert if it actually resolves in DNS. If the A
+      # record is missing, including it in the cert request makes the WHOLE
+      # issuance fail (Let's Encrypt HTTP-01 can't reach a non-existent host),
+      # leaving the main DOMAIN without a cert and the site down.
+      if getent hosts "${AI_DOMAIN}" >/dev/null 2>&1 || host "${AI_DOMAIN}" >/dev/null 2>&1; then
+        certbot_args+=(-d "${AI_DOMAIN}")
+      else
+        echo "[ensure_certificate] WARNING: AI_DOMAIN '${AI_DOMAIN}' does not resolve in DNS; excluding it from the cert. Create an A record (or set AI_DOMAIN='') to enable ai.lowkey.su." >&2
+      fi
     fi
 
     if [[ "${needs_expand}" == "true" ]]; then
@@ -434,28 +442,34 @@ ensure_certificate() {
   fi
 
   if [[ -n "${N8N_DOMAIN}" && ! -f "${n8n_cert_dir}/fullchain.pem" ]]; then
-    certbot certonly \
+    # n8n is an optional auxiliary service; a missing DNS record for it must NOT
+    # abort the whole deploy (it would leave the main site down). Warn and continue.
+    if ! certbot certonly \
       --webroot \
       -w /var/www/certbot \
       -d "${N8N_DOMAIN}" \
       --cert-name "${N8N_DOMAIN}" \
       --non-interactive \
       --agree-tos \
-      -m "${LETSENCRYPT_EMAIL}"
+      -m "${LETSENCRYPT_EMAIL}"; then
+      echo "[ensure_certificate] WARNING: cert for ${N8N_DOMAIN} failed (DNS not set up?). n8n HTTPS will be unavailable; main site unaffected." >&2
+    fi
   fi
 
   # Spider cert — migrated from Caddy. Separate cert (different site).
   if [[ -n "${SPIDER_DOMAIN:-}" ]]; then
     local spider_cert_dir="/etc/letsencrypt/live/${SPIDER_DOMAIN}"
     if [[ ! -f "${spider_cert_dir}/fullchain.pem" ]]; then
-      certbot certonly \
+      if ! certbot certonly \
         --webroot \
         -w /var/www/certbot \
         -d "${SPIDER_DOMAIN}" \
         --cert-name "${SPIDER_DOMAIN}" \
         --non-interactive \
         --agree-tos \
-        -m "${LETSENCRYPT_EMAIL}"
+        -m "${LETSENCRYPT_EMAIL}"; then
+        echo "[ensure_certificate] WARNING: cert for ${SPIDER_DOMAIN} failed. spider HTTPS will be unavailable; main site unaffected." >&2
+      fi
     fi
   fi
 }
