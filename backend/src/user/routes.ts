@@ -330,17 +330,20 @@ export const userRoutes = new Elysia({ prefix: "/user" })
        *
        * Without this, an active subscriber sees no `vlessLink` in the UI even
        * though the physical VPN node is up. We default to the production
-       * `s1.lowkey.su` node with VLESS TLS on :2443 and MTProto on :2444 —
+       * `s1.lowkey.su` node (193.41.5.130) with VLESS TLS on :2443 and MTProto on :2444 —
        * overridable via env for staging:
        *   VPN_FALLBACK_HOST       (default: s1.lowkey.su)
-       *   VPN_FALLBACK_IP         (default: 89.169.54.87)
+       *   VPN_FALLBACK_IP         (default: 193.41.5.130)
        *   VPN_FALLBACK_LOCATION   (default: "Russia · Moscow")
+       *
+       * Note: s1.lowkey.su resolves to the SAME host as lowkey.su (193.41.5.130),
+       * i.e. one physical box runs both the site and the VPN node.
        */
       const syntheticServer =
         !vpnServer && !fallbackServer && isSubscriptionActive
           ? {
               id: "synthetic-s1",
-              ip: process.env.VPN_FALLBACK_IP ?? "89.169.54.87",
+              ip: process.env.VPN_FALLBACK_IP ?? "193.41.5.130",
               hostname: process.env.VPN_FALLBACK_HOST ?? "s1.lowkey.su",
               location:
                 process.env.VPN_FALLBACK_LOCATION ?? "Russia · Moscow",

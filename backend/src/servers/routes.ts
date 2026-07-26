@@ -172,7 +172,7 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
         where: { status: "online" },
         orderBy: { currentLoad: "asc" },
       });
-      const host = String(server?.ip || "46.226.166.226").trim();
+      const host = String(server?.ip || "193.41.5.130").trim();
       const params =
         enabled && secret
           ? new URLSearchParams({
