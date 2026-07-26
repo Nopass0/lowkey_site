@@ -122,15 +122,15 @@ export default function TariffsAdminPage() {
       toast.error("Боевые ключи YooKassa не настроены на сервере");
       return;
     }
+    // Optimistic update of ONLY this switch; don't touch the others.
+    const prevMode = ykMode;
+    setYkMode(newMode);
     setYkSaving(true);
     try {
-      const saved = await apiClient.patch<AdminYokassaSettings>(
-        "/admin/yokassa/settings",
-        { mode: newMode },
-      );
-      applyYKSettings(saved);
+      await apiClient.patch("/admin/yokassa/settings", { mode: newMode });
       toast.success(`ЮKassa переключена в режим: ${newMode === "test" ? "Тестовый" : "Боевой"}`);
     } catch {
+      setYkMode(prevMode); // rollback only this switch
       toast.error("Ошибка при смене режима ЮKassa");
     } finally {
       setYkSaving(false);
@@ -138,15 +138,14 @@ export default function TariffsAdminPage() {
   };
 
   const handleToggleTestSubscription = async () => {
+    const next = !testSubscriptionEnabled;
+    setTestSubscriptionEnabled(next); // optimistic, only this switch
     setYkSaving(true);
     try {
-      const next = !testSubscriptionEnabled;
-      const saved = await apiClient.patch<AdminYokassaSettings>("/admin/yokassa/settings", {
-        testSubscriptionEnabled: next,
-      });
-      applyYKSettings(saved);
+      await apiClient.patch("/admin/yokassa/settings", { testSubscriptionEnabled: next });
       toast.success(next ? "Тестовая подписка включена" : "Тестовая подписка отключена");
     } catch {
+      setTestSubscriptionEnabled(!next); // rollback
       toast.error("Не удалось обновить тестовую подписку");
     } finally {
       setYkSaving(false);
@@ -154,15 +153,14 @@ export default function TariffsAdminPage() {
   };
 
   const handleToggleGlobalAiMenu = async () => {
+    const next = !hideAiMenuForAll;
+    setHideAiMenuForAll(next); // optimistic, only this switch
     setYkSaving(true);
     try {
-      const next = !hideAiMenuForAll;
-      const saved = await apiClient.patch<AdminYokassaSettings>("/admin/yokassa/settings", {
-        hideAiMenuForAll: next,
-      });
-      applyYKSettings(saved);
+      await apiClient.patch("/admin/yokassa/settings", { hideAiMenuForAll: next });
       toast.success(next ? "AI скрыт у всех пользователей" : "AI снова показывается в меню");
     } catch {
+      setHideAiMenuForAll(!next); // rollback
       toast.error("Не удалось обновить глобальную настройку AI");
     } finally {
       setYkSaving(false);
@@ -170,19 +168,18 @@ export default function TariffsAdminPage() {
   };
 
   const handleChangeSbpProvider = async (next: "tochka" | "yookassa") => {
+    const prev = sbpProvider;
+    setSbpProvider(next); // optimistic, only this switch
     setYkSaving(true);
     try {
-      const saved = await apiClient.patch<AdminYokassaSettings>(
-        "/admin/yokassa/settings",
-        { sbpProvider: next },
-      );
-      applyYKSettings(saved);
+      await apiClient.patch("/admin/yokassa/settings", { sbpProvider: next });
       toast.success(
         next === "yookassa"
           ? "СБП переведён на YooKassa"
           : "СБП переведён на Точка Банк",
       );
     } catch {
+      setSbpProvider(prev); // rollback
       toast.error("Не удалось обновить провайдера СБП");
     } finally {
       setYkSaving(false);

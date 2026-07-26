@@ -116,6 +116,8 @@ export interface UserProfile {
   telegramLinkCode: string | null;
   referralRate: number;
   sbpProvider?: "tochka" | "yookassa";
+  /** v2ray/Throne/Happ/Nekoray-compatible subscription URL (token=user UUID). */
+  subscribeLink?: string;
   vpnAccess: UserVpnAccess | null;
 }
 

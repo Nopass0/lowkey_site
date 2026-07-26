@@ -6,6 +6,7 @@
 import Elysia, { t } from "elysia";
 import { db } from "../db";
 import { authMiddleware } from "../auth/middleware";
+import { buildSubscribeUrl } from "../subscriptions/subscribe-link";
 import crypto from "crypto";
 
 type TelegramProxyPlan = {
@@ -46,7 +47,7 @@ function avatarHash(login: string): string {
   return crypto.createHash("md5").update(login.toLowerCase()).digest("hex");
 }
 
-function buildVlessLink(
+export function buildVlessLink(
   template: string | null,
   userId: string,
   serverIp: string,
@@ -183,7 +184,7 @@ function buildDefaultVlessTemplate(
  *   fallback is safe: even if VLESS TLS inbound is down on :2443, the worst
  *   case is a non-working link, not a missing UI element.
  */
-function resolveVlessTemplate(server: {
+export function resolveVlessTemplate(server: {
   ip: string;
   hostname?: string | null;
   serverType?: string | null;
@@ -451,6 +452,10 @@ export const userRoutes = new Elysia({ prefix: "/user" })
         telegramLinkCode: !dbUser.telegramId ? linkCode : null,
         referralRate: dbUser.referralRate,
         sbpProvider: ykSettings.sbpProvider,
+        // Single subscription URL importable by v2rayN/Throne/Happ/Nekoray.
+        // Always present (even without subscription); the endpoint returns 402
+        // if expired, which clients display as "subscription expired".
+        subscribeLink: buildSubscribeUrl(dbUser.id),
         vpnAccess: selectedServer
           ? {
               serverIp: selectedServer.ip,

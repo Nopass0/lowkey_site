@@ -163,10 +163,12 @@ export const vpnServerRoutes = new Elysia({ prefix: "/servers" })
       const settings = await db.mtprotoSettings.findFirst({});
       const secret = toMtprotoClientSecret(settings?.secret);
       const enabled = Boolean(settings?.enabled && secret);
+      // Default MTProto port is 2444 (the hysteria-server mtproto_listen on the
+      // production node). Was 443 previously, which is wrong — 443 is the website.
       const port =
         typeof settings?.port === "number" && Number.isFinite(settings.port)
           ? Math.max(1, Math.trunc(settings.port))
-          : 443;
+          : Number.parseInt(process.env.MTPROTO_FALLBACK_PORT ?? "2444", 10);
 
       const server = await db.vpnServer.findFirst({
         where: { status: "online" },

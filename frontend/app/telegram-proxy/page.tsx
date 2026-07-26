@@ -18,12 +18,15 @@ const fallbackProxy: Required<Pick<PublicMtproto, "host" | "port">> & {
   tgLink: string;
   shareLink: string;
 } = {
+  // Fallback only — normally the page fetches /api/servers/public/mtproto which
+  // returns the live host/port/secret from mtproto_settings. Port 2444 matches
+  // the hysteria-server mtproto_listen on the production node.
   host: "193.41.5.130",
-  port: 443,
+  port: 2444,
   tgLink:
-    "tg://proxy?server=193.41.5.130&port=443&secret=ee7f431728f0a4a65260b1b03efdefd4f66c6f776b65792e7375",
+    "tg://proxy?server=193.41.5.130&port=2444&secret=ddb46d3009c13e0ee5fbea34005e3dd39f",
   shareLink:
-    "https://t.me/proxy?server=193.41.5.130&port=443&secret=ee7f431728f0a4a65260b1b03efdefd4f66c6f776b65792e7375",
+    "https://t.me/proxy?server=193.41.5.130&port=2444&secret=ddb46d3009c13e0ee5fbea34005e3dd39f",
 };
 
 const pageTitle = "MTProto прокси lowkey для Telegram";

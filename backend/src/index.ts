@@ -17,6 +17,7 @@ import { paymentRoutes } from "./payments/routes";
 import { yokassaPaymentRoutes, yokassaWebhookRoute } from "./payments/yokassa-routes";
 import { processAutoRenewals } from "./payments/yokassa";
 import { subscriptionRoutes } from "./subscriptions/routes";
+import { subscribeLinkRoutes } from "./subscriptions/subscribe-link";
 import { deviceRoutes } from "./devices/routes";
 import { promoRoutes } from "./promo/routes";
 import { referralRoutes } from "./referral/routes";
@@ -276,6 +277,9 @@ const app = new Elysia()
   .use(adminClientRulesRoutes)
   .use(authRoutes)
   .use(userRoutes)
+  // Public subscription endpoint (no JWT; token=user UUID). Registered before
+  // other /api routes so it's reachable at /api/subscribe-link.
+  .use(subscribeLinkRoutes)
   .use(paymentRoutes)
   .use(yokassaPaymentRoutes)
   .use(yokassaWebhookRoute)
