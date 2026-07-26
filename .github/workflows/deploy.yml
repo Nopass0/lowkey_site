@@ -25,10 +25,16 @@ jobs:
       BITNET_BIND_PORT: ${{ github.ref_name == 'main' && '8080' || '9080' }}
       NEXT_PUBLIC_API_URL: ${{ github.ref_name == 'main' && 'https://lowkey.su/api' || 'https://dev.lowkey.su/api' }}
       NEXT_PUBLIC_SITE_URL: ${{ github.ref_name == 'main' && 'https://lowkey.su' || 'https://dev.lowkey.su' }}
-      VOIDDB_URL: https://db.lowkey.su
+      # VoidDB runs on the host as a systemd service on :7700; nginx proxies
+      # db.lowkey.su (HTTP, intra-host) -> 127.0.0.1:7700. Backend reaches it
+      # via http://db.lowkey.su (NOT https — no public TLS needed for intra-host).
+      VOIDDB_DOMAIN: ${{ github.ref_name == 'main' && 'db.lowkey.su' || 'db.dev.lowkey.su' }}
+      VOIDDB_URL: ${{ github.ref_name == 'main' && 'http://db.lowkey.su' || 'http://db.dev.lowkey.su' }}
       VOIDDB_USERNAME: admin
       VOIDDB_PASSWORD: ${{ secrets.VOIDDB_PASSWORD }}
-      VOIDDB_TOKEN: ${{ secrets.VOIDDB_TOKEN }}
+      # VOIDDB_TOKEN left empty: the token is JWT-bound to VOIDDB_JWT_SECRET on
+      # the VoidDB host. If absent/invalid, the ORM falls back to username+password.
+      VOIDDB_TOKEN: ''
       LEGACY_DATABASE_URL: ${{ github.ref_name == 'main' && secrets.DATABASE_URL || secrets.DEV_DATABASE_URL }}
       LEGACY_REDIS_URL: ${{ secrets.REDIS_URL }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -265,6 +271,7 @@ jobs:
           NEXT_PUBLIC_SITE_URL: ${{ env.NEXT_PUBLIC_SITE_URL }}
           REMOTE_BASE: ${{ env.REMOTE_BASE }}
           LETSENCRYPT_EMAIL: ${{ env.LETSENCRYPT_EMAIL }}
+          VOIDDB_DOMAIN: ${{ env.VOIDDB_DOMAIN }}
           VOIDDB_URL: ${{ env.VOIDDB_URL }}
           VOIDDB_USERNAME: ${{ env.VOIDDB_USERNAME }}
           VOIDDB_PASSWORD: ${{ env.VOIDDB_PASSWORD }}
@@ -351,6 +358,7 @@ jobs:
              NEXT_PUBLIC_API_URL='${NEXT_PUBLIC_API_URL}' \
              NEXT_PUBLIC_SITE_URL='${NEXT_PUBLIC_SITE_URL}' \
              LETSENCRYPT_EMAIL='${LETSENCRYPT_EMAIL}' \
+             VOIDDB_DOMAIN='${VOIDDB_DOMAIN}' \
              VOIDDB_URL='${VOIDDB_URL}' \
              VOIDDB_USERNAME='${VOIDDB_USERNAME}' \
              VOIDDB_PASSWORD='${VOIDDB_PASSWORD}' \

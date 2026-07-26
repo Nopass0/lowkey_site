@@ -195,6 +195,44 @@ server {
 EOF
 }
 
+# ─── VoidDB (db.lowkey.su) ──────────────────────────────────────────────
+# VoidDB runs as a systemd service on the host (installed via the official
+# one-command deploy: https://github.com/Nopass0/void). It listens on
+# 127.0.0.1:7700. nginx proxies db.lowkey.su (HTTP) -> 127.0.0.1:7700 so the
+# backend docker container can reach it via http://db.lowkey.su.
+#
+# HTTP only (no TLS): db.lowkey.su traffic is intra-host (backend container ->
+# host nginx -> 127.0.0.1:7700). Adding public HTTPS here would need a cert for
+# db.lowkey.su, which is unnecessary since only the backend talks to it.
+append_voiddb_config() {
+  local target_path="$1"
+
+  [[ -n "${VOIDDB_DOMAIN:-}" ]] || return 0
+
+  cat >> "${target_path}" <<EOF
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${VOIDDB_DOMAIN};
+
+    client_max_body_size 64m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${VOIDDB_PORT:-7700};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+    }
+}
+EOF
+}
+
 write_compose_env_file() {
   local compose_tmp
 
@@ -378,6 +416,8 @@ install_nginx_config() {
   fi
 
   append_spider_config "${target}"
+
+  append_voiddb_config "${target}"
 
   ln -sf "${target}" "${enabled}"
   nginx -t
